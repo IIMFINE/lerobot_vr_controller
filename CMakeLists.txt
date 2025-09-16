@@ -6,21 +6,29 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # Find dependencies
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(urdf REQUIRED)
-find_package(robot_state_publisher REQUIRED)
-find_package(rviz2 REQUIRED)
-find_package(xacro REQUIRED)
+find_package(ament_cmake_auto REQUIRED)
+ament_auto_find_build_dependencies()
+
+find_package(yaml-cpp REQUIRED)
+
+# Find all .cpp files in src directory
+file(GLOB_RECURSE CPP_SOURCES "src/*.cpp")
+
+# Add source files and create executable
+ament_auto_add_executable(${PROJECT_NAME}_node ${CPP_SOURCES})
+
+# Include header files
+target_include_directories(${PROJECT_NAME}_node PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# Link yaml-cpp library
+target_link_libraries(${PROJECT_NAME}_node ${YAML_CPP_LIBRARIES})
+target_include_directories(${PROJECT_NAME}_node PRIVATE ${YAML_CPP_INCLUDE_DIRS})
 
 # Install directories
 install(
-  DIRECTORY launch rviz model
+  DIRECTORY launch rviz model config
   DESTINATION share/${PROJECT_NAME}/
 )
 
@@ -42,4 +50,4 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_package()
+ament_auto_package()

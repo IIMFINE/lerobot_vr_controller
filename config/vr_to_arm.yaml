@@ -1,3 +1,5 @@
 vr_to_arm_tf:
   #tf link mapping
   gripper_frame_link: wrist_right
+gripper_world_frame: base_link
+vr_world_frame: world_vr
