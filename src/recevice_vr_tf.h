@@ -64,6 +64,8 @@ private:
   std::map<std::string, geometry_msgs::msg::TransformStamped>
       vr_base_link_dummy_tf_;
 
+  std::map<std::string, tf2::Quaternion> vr_wrist_to_gripper_rot_;
+
   // Timer for calibration at 10Hz
   rclcpp::TimerBase::SharedPtr calibration_timer_;
 
