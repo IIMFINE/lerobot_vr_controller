@@ -117,7 +117,7 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
 
   calibrated_flag_ = false;
 
-  vr_to_gripper_tf_.clear();
+  vr_base_link_dummy_tf_.clear();
 
   for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
     try {
@@ -139,19 +139,24 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
       tf2::fromMsg(world_to_gripper.transform, tf_world_to_gripper);
       tf2::fromMsg(world_to_vr.transform, tf_world_to_vr);
 
+      // Link: vr_world_frame -> vr_base_link_dummy -> vr_frame
+      // To tf to real arm is: vr_base_link_dummy -> vr_frame
       // Compute vr to gripper transform
-      tf2::Transform tf_vr_to_gripper =
-          tf_world_to_vr.inverse() * tf_world_to_gripper;
+      // tf2::Transform tf_vr_to_gripper =
+      //     tf_world_to_vr.inverse() * tf_world_to_gripper;
+
+      tf2::Transform vr_base_link_dummy =
+          tf_world_to_vr * tf_world_to_gripper.inverse();
 
       // Convert back to TransformStamped message
-      geometry_msgs::msg::TransformStamped vr_to_gripper_msg;
-      vr_to_gripper_msg.header.frame_id = vr_frame;
-      vr_to_gripper_msg.child_frame_id = gripper_link + "_calibrated";
-      vr_to_gripper_msg.header.stamp = node_->now();
-      vr_to_gripper_msg.transform = tf2::toMsg(tf_vr_to_gripper);
+      geometry_msgs::msg::TransformStamped vr_base_link_dummy_msg;
+      vr_base_link_dummy_msg.header.frame_id = vr_frame;
+      vr_base_link_dummy_msg.child_frame_id = vr_frame + kVrBaseLinkDummySuffix;
+      vr_base_link_dummy_msg.header.stamp = node_->now();
+      vr_base_link_dummy_msg.transform = tf2::toMsg(vr_base_link_dummy);
 
       // Store the transformation
-      vr_to_gripper_tf_[gripper_link] = vr_to_gripper_msg;
+      vr_base_link_dummy_tf_[gripper_link] = vr_base_link_dummy_msg;
 
       calibrated_flag_ = true;
       should_calibrate_ = false;
@@ -168,10 +173,10 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
     }
   }
 
-  if (!vr_to_gripper_tf_.empty()) {
+  if (!vr_base_link_dummy_tf_.empty()) {
     RCLCPP_INFO(node_->get_logger(),
                 "Successfully computed %zu VR to gripper transformations",
-                vr_to_gripper_tf_.size());
+                vr_base_link_dummy_tf_.size());
   }
 }
 
@@ -188,20 +193,20 @@ void VrTfReceiver::Vr2GripperTfPublish() {
                                                  tf2::TimePointZero);
 
       // Apply calibration transformation
-      auto it = vr_to_gripper_tf_.find(gripper_link);
-      if (it != vr_to_gripper_tf_.end()) {
-        // Create child frame name with "gripper_cal" suffix
-        std::string child_frame = gripper_link + "_gripper_cal";
+      auto it = vr_base_link_dummy_tf_.find(gripper_link);
+      if (it != vr_base_link_dummy_tf_.end()) {
+        // Create child frame name with gripper cal suffix
+        std::string child_frame = gripper_link + kGripperCalSuffix;
 
         // Apply the stored calibration transformation using tf2
         tf2::Transform tf_vr_current;
-        tf2::Transform tf_vr_to_gripper;
+        tf2::Transform tf_vr_base_link_dummy;
 
         tf2::fromMsg(vr_transform.transform, tf_vr_current);
-        tf2::fromMsg(it->second.transform, tf_vr_to_gripper);
+        tf2::fromMsg(it->second.transform, tf_vr_base_link_dummy);
 
-        // Compute the calibrated gripper transform
-        tf2::Transform tf_calibrated_gripper = tf_vr_current * tf_vr_to_gripper;
+        tf2::Transform tf_dummy_to_gripper =
+            tf_vr_base_link_dummy.inverse() * tf_vr_current;
 
         // Convert back to geometry_msgs and publish
         geometry_msgs::msg::TransformStamped calibrated_transform;
@@ -209,7 +214,7 @@ void VrTfReceiver::Vr2GripperTfPublish() {
         // calibrated_transform.header.frame_id = gripper_world_frame_;
         calibrated_transform.header.frame_id = vr_world_frame_;
         calibrated_transform.child_frame_id = child_frame;
-        calibrated_transform.transform = tf2::toMsg(tf_calibrated_gripper);
+        calibrated_transform.transform = tf2::toMsg(tf_dummy_to_gripper);
 
         tf_broadcaster_->sendTransform(calibrated_transform);
       }

@@ -18,6 +18,10 @@
 
 namespace lerobot_vr_controller {
 
+// Constants
+static constexpr const char *kGripperCalSuffix = "_cal";
+static constexpr const char *kVrBaseLinkDummySuffix = "_vr_dummy";
+
 class VrTfReceiver {
 public:
   explicit VrTfReceiver(std::shared_ptr<rclcpp::Node> node);
@@ -57,7 +61,8 @@ private:
   std::atomic<bool> calibrated_flag_{false};
 
   // Store VR to gripper transformation matrices
-  std::map<std::string, geometry_msgs::msg::TransformStamped> vr_to_gripper_tf_;
+  std::map<std::string, geometry_msgs::msg::TransformStamped>
+      vr_base_link_dummy_tf_;
 
   // Timer for calibration at 10Hz
   rclcpp::TimerBase::SharedPtr calibration_timer_;
