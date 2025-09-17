@@ -7,7 +7,7 @@
   <maintainer email="pan@todo.todo">pan</maintainer>
   <license>TODO: License declaration</license>
 
-  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
@@ -23,6 +23,10 @@
   <depend>joint_state_publisher_gui</depend>
   <depend>rviz2</depend>
   <depend>xacro</depend>
+  <depend>tf2_kdl</depend>
+  <depend>kdl_parser</depend>
+  <depend>orocos_kdl</depend>
+  <depend>trac_ik_lib</depend>
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
