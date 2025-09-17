@@ -235,7 +235,7 @@ void VrTfReceiver::Vr2GripperTfPublish() {
       // Convert back to geometry_msgs and publish
       geometry_msgs::msg::TransformStamped calibrated_transform;
       calibrated_transform.header.stamp = node_->now();
-      calibrated_transform.header.frame_id = vr_world_frame_;
+      calibrated_transform.header.frame_id = gripper_world_frame_;
       calibrated_transform.child_frame_id = child_frame;
       calibrated_transform.transform = tf2::toMsg(tf_vr_to_gripper_cal);
 
