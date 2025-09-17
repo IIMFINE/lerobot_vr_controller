@@ -185,52 +185,67 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
   }
 }
 
+tf2::Transform VrTfReceiver::Vr2GripperTf(const std::string &gripper_link,
+                                          const std::string &vr_frame) {
+  // Get current VR transform
+  geometry_msgs::msg::TransformStamped vr_transform;
+  vr_transform = tf_buffer_->lookupTransform(vr_world_frame_, vr_frame,
+                                             tf2::TimePointZero);
+
+  // Apply calibration transformation
+  auto it = vr_base_link_dummy_tf_.find(gripper_link);
+  if (it == vr_base_link_dummy_tf_.end()) {
+    throw std::runtime_error("Calibration data not found for gripper link: " +
+                             gripper_link);
+  }
+
+  // Apply the stored calibration transformation using tf2
+  tf2::Transform tf_vr_current;
+  tf2::Transform tf_vr_base_link_dummy;
+
+  tf2::fromMsg(vr_transform.transform, tf_vr_current);
+  tf2::fromMsg(it->second.transform, tf_vr_base_link_dummy);
+
+  tf2::Quaternion tf_vr_rot_to_gripper =
+      tf_vr_current.getRotation() * vr_wrist_to_gripper_rot_[gripper_link];
+
+  tf2::Transform tf_vr_rot_correction =
+      tf2::Transform(tf_vr_rot_to_gripper, tf_vr_current.getOrigin());
+
+  tf2::Transform tf_vr_to_gripper_cal =
+      tf_vr_base_link_dummy.inverse() * tf_vr_rot_correction;
+
+  return tf_vr_to_gripper_cal;
+}
+
 void VrTfReceiver::Vr2GripperTfPublish() {
   if (!calibrated_flag_) {
     return;
   }
 
   for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
-    // Get current VR transform
     try {
-      geometry_msgs::msg::TransformStamped vr_transform;
-      vr_transform = tf_buffer_->lookupTransform(vr_world_frame_, vr_frame,
-                                                 tf2::TimePointZero);
+      // Calculate the transformation using the new Vr2GripperTf function
+      tf2::Transform tf_vr_to_gripper_cal =
+          Vr2GripperTf(gripper_link, vr_frame);
 
-      // Apply calibration transformation
-      auto it = vr_base_link_dummy_tf_.find(gripper_link);
-      if (it != vr_base_link_dummy_tf_.end()) {
-        // Create child frame name with gripper cal suffix
-        std::string child_frame = gripper_link + kGripperCalSuffix;
+      // Create child frame name with gripper cal suffix
+      std::string child_frame = gripper_link + kGripperCalSuffix;
 
-        // Apply the stored calibration transformation using tf2
-        tf2::Transform tf_vr_current;
-        tf2::Transform tf_vr_base_link_dummy;
+      // Convert back to geometry_msgs and publish
+      geometry_msgs::msg::TransformStamped calibrated_transform;
+      calibrated_transform.header.stamp = node_->now();
+      calibrated_transform.header.frame_id = vr_world_frame_;
+      calibrated_transform.child_frame_id = child_frame;
+      calibrated_transform.transform = tf2::toMsg(tf_vr_to_gripper_cal);
 
-        tf2::fromMsg(vr_transform.transform, tf_vr_current);
-        tf2::fromMsg(it->second.transform, tf_vr_base_link_dummy);
-
-        tf2::Quaternion tf_vr_rot_to_gripper =
-            tf_vr_current.getRotation() *
-            vr_wrist_to_gripper_rot_[gripper_link];
-
-        tf2::Transform tf_vr_rot_correction =
-            tf2::Transform(tf_vr_rot_to_gripper, tf_vr_current.getOrigin());
-
-        tf2::Transform tf_vr_to_gripper_cal =
-            tf_vr_base_link_dummy.inverse() * tf_vr_rot_correction;
-
-        // Convert back to geometry_msgs and publish
-        geometry_msgs::msg::TransformStamped calibrated_transform;
-        calibrated_transform.header.stamp = node_->now();
-        calibrated_transform.header.frame_id = vr_world_frame_;
-        calibrated_transform.child_frame_id = child_frame;
-        calibrated_transform.transform = tf2::toMsg(tf_vr_to_gripper_cal);
-
-        tf_broadcaster_->sendTransform(calibrated_transform);
-      }
-    } catch (tf2::TransformException &ex) {
+      tf_broadcaster_->sendTransform(calibrated_transform);
+    } catch (const std::exception &ex) {
       // Silently continue if transform not available
+      RCLCPP_WARN(node_->get_logger(),
+                  "Skipping publish for gripper_link: %s, vr_frame: %s. Error: "
+                  "%s",
+                  gripper_link.c_str(), vr_frame.c_str(), ex.what());
     }
   }
 }

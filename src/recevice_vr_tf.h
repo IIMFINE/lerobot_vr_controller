@@ -33,6 +33,9 @@ public:
   // Start receiving VR data
   void Start();
 
+  tf2::Transform Vr2GripperTf(const std::string &gripper_link,
+                              const std::string &vr_frame);
+
 private:
   void CalibrateVr2GripperTf();
 
