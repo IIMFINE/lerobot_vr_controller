@@ -8,6 +8,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/joy.hpp"
 #include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2_ros/buffer.h"
@@ -33,11 +34,7 @@ private:
 
   void Vr2GripperTfPublish();
 
-  // Publish TF transform
-  void PublishTransform(const std::string &parent_frame,
-                        const std::string &child_frame,
-                        const geometry_msgs::msg::Pose &pose,
-                        const rclcpp::Time &timestamp);
+  void JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg);
 
   // Load configuration from YAML
   bool LoadYamlConfig(const std::string &yaml_file_path);
@@ -56,7 +53,8 @@ private:
   std::string yaml_config_path_;
 
   std::map<std::string, std::string> gripper_link_to_vr_map_;
-  bool calibrated_flag_ = false;
+  std::atomic<bool> should_calibrate_{false};
+  std::atomic<bool> calibrated_flag_{false};
 
   // Store VR to gripper transformation matrices
   std::map<std::string, geometry_msgs::msg::TransformStamped> vr_to_gripper_tf_;
@@ -66,6 +64,9 @@ private:
 
   // Timer for VR to gripper TF publishing at 100Hz
   rclcpp::TimerBase::SharedPtr vr_to_gripper_publish_timer_;
+
+  // Joystick subscriber
+  rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscriber_;
 
   // Configurable world frame names
   std::string gripper_world_frame_;
