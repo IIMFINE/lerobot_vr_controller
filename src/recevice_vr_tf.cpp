@@ -139,14 +139,19 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
       tf2::fromMsg(world_to_gripper.transform, tf_world_to_gripper);
       tf2::fromMsg(world_to_vr.transform, tf_world_to_vr);
 
-      // Link: vr_world_frame -> vr_base_link_dummy -> vr_frame
-      // To tf to real arm is: vr_base_link_dummy -> vr_frame
-      // Compute vr to gripper transform
-      // tf2::Transform tf_vr_to_gripper =
-      //     tf_world_to_vr.inverse() * tf_world_to_gripper;
+      // Compute and store rotation from gripper to VR for future use
+      tf2::Quaternion gripper_q = tf_world_to_gripper.getRotation();
+      tf2::Quaternion vr_q = tf_world_to_vr.getRotation();
+      tf2::Quaternion vr_to_gripper_q = vr_q.inverse() * gripper_q;
+      vr_wrist_to_gripper_rot_[gripper_link] = vr_to_gripper_q;
+
+      // Link: vr_world_frame -> vr_base_link_dummy -> vr_gripper_dummy
+      // To tf to real arm is: vr_base_link_dummy -> vr_gripper_dummy
+      tf2::Transform tf_vr_gripper_dummy =
+          tf2::Transform(gripper_q, tf_world_to_vr.getOrigin());
 
       tf2::Transform vr_base_link_dummy =
-          tf_world_to_vr * tf_world_to_gripper.inverse();
+          tf_vr_gripper_dummy * tf_world_to_gripper.inverse();
 
       // Convert back to TransformStamped message
       geometry_msgs::msg::TransformStamped vr_base_link_dummy_msg;
@@ -205,16 +210,22 @@ void VrTfReceiver::Vr2GripperTfPublish() {
         tf2::fromMsg(vr_transform.transform, tf_vr_current);
         tf2::fromMsg(it->second.transform, tf_vr_base_link_dummy);
 
-        tf2::Transform tf_dummy_to_gripper =
-            tf_vr_base_link_dummy.inverse() * tf_vr_current;
+        tf2::Quaternion tf_vr_rot_to_gripper =
+            tf_vr_current.getRotation() *
+            vr_wrist_to_gripper_rot_[gripper_link];
+
+        tf2::Transform tf_vr_rot_correction =
+            tf2::Transform(tf_vr_rot_to_gripper, tf_vr_current.getOrigin());
+
+        tf2::Transform tf_vr_to_gripper_cal =
+            tf_vr_base_link_dummy.inverse() * tf_vr_rot_correction;
 
         // Convert back to geometry_msgs and publish
         geometry_msgs::msg::TransformStamped calibrated_transform;
         calibrated_transform.header.stamp = node_->now();
-        // calibrated_transform.header.frame_id = gripper_world_frame_;
         calibrated_transform.header.frame_id = vr_world_frame_;
         calibrated_transform.child_frame_id = child_frame;
-        calibrated_transform.transform = tf2::toMsg(tf_dummy_to_gripper);
+        calibrated_transform.transform = tf2::toMsg(tf_vr_to_gripper_cal);
 
         tf_broadcaster_->sendTransform(calibrated_transform);
       }
