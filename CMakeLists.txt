@@ -13,6 +13,7 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
+# 手动查找yaml-cpp，因为它可能不在ament依赖中
 find_package(yaml-cpp REQUIRED)
 
 # Find all .cpp files in src directory
