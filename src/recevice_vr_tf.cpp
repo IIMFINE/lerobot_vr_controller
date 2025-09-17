@@ -40,29 +40,12 @@ void VrTfReceiver::Start() {
   vr_to_gripper_publish_timer_ = node_->create_wall_timer(
       std::chrono::milliseconds(10),
       std::bind(&VrTfReceiver::Vr2GripperTfPublish, this));
-}
 
-void VrTfReceiver::PublishTransform(const std::string &parent_frame,
-                                    const std::string &child_frame,
-                                    const geometry_msgs::msg::Pose &pose,
-                                    const rclcpp::Time &timestamp) {
-
-  geometry_msgs::msg::TransformStamped transform_stamped;
-
-  transform_stamped.header.stamp = timestamp;
-  transform_stamped.header.frame_id = parent_frame;
-  transform_stamped.child_frame_id = child_frame;
-
-  transform_stamped.transform.translation.x = pose.position.x;
-  transform_stamped.transform.translation.y = pose.position.y;
-  transform_stamped.transform.translation.z = pose.position.z;
-
-  transform_stamped.transform.rotation = pose.orientation;
-
-  tf_broadcaster_->sendTransform(transform_stamped);
-
-  RCLCPP_DEBUG(node_->get_logger(), "Published transform from %s to %s",
-               parent_frame.c_str(), child_frame.c_str());
+  // Create joystick subscriber
+  auto qos = rclcpp::QoS(10).best_effort();
+  joy_subscriber_ = node_->create_subscription<sensor_msgs::msg::Joy>(
+      "/vr/controller_right/joy", qos,
+      std::bind(&VrTfReceiver::JoystickCallback, this, std::placeholders::_1));
 }
 
 bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
@@ -128,11 +111,12 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
     return;
   }
 
-  if (calibrated_flag_) {
+  if (!should_calibrate_) {
     return;
   }
 
-  // Clear previous transformations
+  calibrated_flag_ = false;
+
   vr_to_gripper_tf_.clear();
 
   for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
@@ -170,10 +154,11 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
       vr_to_gripper_tf_[gripper_link] = vr_to_gripper_msg;
 
       calibrated_flag_ = true;
+      should_calibrate_ = false;
 
-      // RCLCPP_INFO(node_->get_logger(),
-      //             "Successfully computed and published transform from %s to
-      //             %s", vr_frame.c_str(), gripper_link.c_str());
+      RCLCPP_INFO(node_->get_logger(),
+                  "Successfully computed and published transform from %s to %s",
+                  vr_frame.c_str(), gripper_link.c_str());
 
     } catch (const tf2::TransformException &ex) {
       RCLCPP_ERROR(node_->get_logger(),
@@ -221,7 +206,8 @@ void VrTfReceiver::Vr2GripperTfPublish() {
         // Convert back to geometry_msgs and publish
         geometry_msgs::msg::TransformStamped calibrated_transform;
         calibrated_transform.header.stamp = node_->now();
-        calibrated_transform.header.frame_id = gripper_world_frame_;
+        // calibrated_transform.header.frame_id = gripper_world_frame_;
+        calibrated_transform.header.frame_id = vr_world_frame_;
         calibrated_transform.child_frame_id = child_frame;
         calibrated_transform.transform = tf2::toMsg(tf_calibrated_gripper);
 
@@ -230,6 +216,16 @@ void VrTfReceiver::Vr2GripperTfPublish() {
     } catch (tf2::TransformException &ex) {
       // Silently continue if transform not available
     }
+  }
+}
+
+void VrTfReceiver::JoystickCallback(
+    const sensor_msgs::msg::Joy::SharedPtr msg) {
+  // Check if buttons array has at least 6 elements (index 5)
+  if (msg->buttons.size() > 5 && msg->buttons[5] != 0) {
+    should_calibrate_ = true;
+    RCLCPP_INFO(node_->get_logger(),
+                "Calibration triggered by joystick button 5");
   }
 }
 
