@@ -2,7 +2,9 @@
 #define LEROBOT_VR_CONTROLLER_IK_H_
 
 #include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -94,13 +96,6 @@ public:
   void SetTimeout(double timeout);
 
   /**
-   * @brief 设置求解精度
-   * @param eps 位置精度
-   * @param eps_rot 旋转精度
-   */
-  void SetPrecision(double eps = 1e-5, double eps_rot = 1e-3);
-
-  /**
    * @brief 检查是否已初始化
    * @return 初始化状态
    */
@@ -111,6 +106,30 @@ public:
    * @return 关节名称列表
    */
   std::vector<std::string> GetJointNames() const;
+
+  /**
+   * @brief 获取关节占位数映射
+   * @return 关节名称到其在数组中索引位置的映射
+   */
+  std::map<std::string, int> GetJointPlaceholdMap() const;
+
+  /**
+   * @brief 将关节状态对齐到IK求解器的关节顺序
+   * @param joint_names 关节名称列表
+   * @param joint_positions 关节位置列表
+   * @param seed_joints 输出的种子关节角度（按IK求解器的关节顺序）
+   * @return 对齐是否成功
+   */
+  bool AlignJointStateToIk(const std::vector<std::string> &joint_names,
+                           const std::vector<double> &joint_positions,
+                           std::vector<double> &seed_joints) const;
+
+  /**
+   * @brief 检查目标位置是否在工作空间内
+   * @param target_transform 目标变换
+   * @return 是否在工作空间内
+   */
+  bool CheckWorkspace(const tf2::Transform &target_transform) const;
 
 private:
   /**
@@ -153,10 +172,22 @@ private:
   std::vector<std::string> joint_names_;
   std::vector<double> joint_lower_limits_;
   std::vector<double> joint_upper_limits_;
+  std::map<std::string, int> joint_placehold_map_;
   size_t num_joints_;
 
   // 初始化状态
   bool initialized_;
+
+  // 缓存和优化相关
+  mutable std::vector<double> last_solution_cache_;
+  mutable std::mutex solution_cache_mutex_;
+
+  // 智能种子生成
+  std::vector<std::vector<double>> predefined_seeds_;
+  void GenerateSmartSeeds(const tf2::Transform &target_transform,
+                          const std::vector<double> &current_joints,
+                          std::vector<std::vector<double>> &smart_seeds) const;
+  void GeneratePredefinedSeeds();
 };
 
 } // namespace lerobot_vr_controller

@@ -25,12 +25,16 @@ int main(int argc, char **argv) {
   node->declare_parameter<std::string>("config_file", yaml_config_path);
   node->get_parameter("config_file", yaml_config_path);
 
-  printf("pan using config file: %s\n", yaml_config_path.c_str());
+  // Initialize VR TF receiver
+  std::string urdf_file_path = ""; // Default empty path
 
-  if (!vr_tf_receiver->InitializeYamlConfig(yaml_config_path)) {
-    RCLCPP_ERROR(node->get_logger(), "Failed to initialize YAML configuration");
-    rclcpp::shutdown();
-    return -1;
+  // Try to get URDF file path from parameter
+  node->declare_parameter<std::string>("urdf_file", urdf_file_path);
+  node->get_parameter("urdf_file", urdf_file_path);
+
+  if (!vr_tf_receiver->Initialize(yaml_config_path, urdf_file_path)) {
+    RCLCPP_ERROR(node->get_logger(), "Failed to initialize VR TF receiver");
+    return 1;
   }
 
   // Start VR TF receiver
