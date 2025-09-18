@@ -16,11 +16,12 @@ ament_auto_find_build_dependencies()
 # 手动查找yaml-cpp，因为它可能不在ament依赖中
 find_package(yaml-cpp REQUIRED)
 
-# Find all .cpp files in src directory
-file(GLOB_RECURSE CPP_SOURCES "src/*.cpp")
-
-# Add source files and create executable
-ament_auto_add_executable(${PROJECT_NAME}_node ${CPP_SOURCES})
+# Create main VR controller executable
+ament_auto_add_executable(${PROJECT_NAME}_node 
+  src/main.cpp 
+  src/vr_controller.cpp 
+  src/ik.cpp
+)
 
 # Include header files
 target_include_directories(${PROJECT_NAME}_node PRIVATE
@@ -39,11 +40,33 @@ install(
 
 # Install Python launch files
 install(
-  PROGRAMS launch/display_robot.launch.py
+  PROGRAMS 
+    launch/display_robot.launch.py
+    launch/vr_controller.launch.py
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
 if(BUILD_TESTING)
+  # Create IK test executable
+  ament_auto_add_executable(ik_test_node 
+    src/ik_test.cpp 
+    src/ik.cpp
+  )
+  
+  # Configure IK test executable
+  target_include_directories(ik_test_node PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+  
+  target_link_libraries(ik_test_node ${YAML_CPP_LIBRARIES})
+  target_include_directories(ik_test_node PRIVATE ${YAML_CPP_INCLUDE_DIRS})
+
+  # Install IK test launch file
+  install(
+    PROGRAMS launch/ik_test.launch.py
+    DESTINATION share/${PROJECT_NAME}/launch
+  )
+
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

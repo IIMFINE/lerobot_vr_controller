@@ -21,6 +21,18 @@ def generate_launch_description():
         description="Path to the VR to ARM configuration YAML file",
     )
 
+    urdf_file_arg = DeclareLaunchArgument(
+        "urdf_file",
+        default_value=PathJoinSubstitution(
+            [
+                FindPackageShare("lerobot_vr_controller"),
+                "model",
+                "so101_new_calib.urdf",
+            ]
+        ),
+        description="Path to the URDF file",
+    )
+
     log_level_arg = DeclareLaunchArgument(
         "log_level",
         default_value="info",
@@ -36,6 +48,7 @@ def generate_launch_description():
         parameters=[
             {
                 "config_file": LaunchConfiguration("config_file"),
+                "urdf_file": LaunchConfiguration("urdf_file"),
             }
         ],
         arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
@@ -46,6 +59,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             config_file_arg,
+            urdf_file_arg,
             log_level_arg,
             vr_tf_receiver_node,
         ]
