@@ -1,0 +1,19 @@
+joint_state:
+  shoulder_pan:
+    motor_pos: 2047
+    joint_pos: 0
+  shoulder_lift:
+    motor_pos: 2047
+    joint_pos: 0
+  elbow_flex:
+    motor_pos: 2047
+    joint_pos: 0
+  wrist_flex:
+    motor_pos: 2047
+    joint_pos: 0
+  wrist_roll:
+    motor_pos: 2047
+    joint_pos: 0
+  gripper:
+    motor_pos: 2047
+    joint_pos: 0
