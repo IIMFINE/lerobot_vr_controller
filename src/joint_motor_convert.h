@@ -76,28 +76,6 @@ protected:
   std::map<std::string, JointRange> joint_ranges_;
 };
 
-class GripperMotorControl : public JointMotorControl {
-public:
-  explicit GripperMotorControl(
-      const std::string &config_file_path,
-      const std::string &motor_calibration_file_path = "");
-  virtual ~GripperMotorControl() = default;
-
-  // Override virtual functions with empty implementations for now
-  double JointToMotorPosition(const std::string &joint_name,
-                              double joint_position) const override;
-
-  double MotorToJointPosition(const std::string &joint_name,
-                              double motor_position) const override;
-
-  std::vector<std::string> GetJointNames() const override;
-
-  bool IsValidJoint(const std::string &joint_name) const override;
-
-protected:
-  bool LoadConfiguration(const std::string &config_file_path) override;
-};
-
 } // namespace lerobot_vr_controller
 
 #endif // JOINT_MOTOR_CONTROL_H_
