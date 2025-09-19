@@ -70,10 +70,6 @@ private:
   // Load configuration from YAML
   bool LoadYamlConfig(const std::string &yaml_file_path);
 
-  // Converts queued EE targets to joint commands (stub, to be implemented
-  // later)
-  void EePoseIktoJointCmd();
-
   // Control joint with end effector poses from local queue
   void ControlJointWithEe(
       const std::map<std::string,
