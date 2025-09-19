@@ -1,4 +1,4 @@
-#include "ik.h"
+#include "kinematics.h"
 #include "log.h"
 
 #include <iostream>
