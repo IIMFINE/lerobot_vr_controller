@@ -21,6 +21,7 @@ ament_auto_add_executable(${PROJECT_NAME}_node
   src/main.cpp 
   src/vr_controller.cpp 
   src/ik.cpp
+  src/joint_motor_control.cpp
 )
 
 # Include header files
@@ -54,26 +55,6 @@ install(
 )
 
 if(BUILD_TESTING)
-  # Create IK test executable
-  ament_auto_add_executable(ik_test_node 
-    src/ik_test.cpp 
-    src/ik.cpp
-  )
-  
-  # Configure IK test executable
-  target_include_directories(ik_test_node PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-  )
-  
-  target_link_libraries(ik_test_node ${YAML_CPP_LIBRARIES})
-  target_include_directories(ik_test_node PRIVATE ${YAML_CPP_INCLUDE_DIRS})
-
-  # Install IK test launch file
-  install(
-    PROGRAMS launch/ik_test.launch.py
-    DESTINATION share/${PROJECT_NAME}/launch
-  )
-
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

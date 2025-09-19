@@ -156,24 +156,6 @@ bool SoArm101Kinematics::SolveIK(const tf2::Transform &target_transform,
     seed_candidates.push_back(seed_array);
   }
 
-  // 使用提供的种子
-  // if (!seed_joints.empty() && seed_joints.size() == num_joints_) {
-  //   KDL::JntArray provided_seed(num_joints_);
-  //   for (size_t i = 0; i < num_joints_; ++i) {
-  //     provided_seed(i) = seed_joints[i];
-  //   }
-  //   seed_candidates.insert(seed_candidates.begin(), provided_seed);
-  // }
-
-  // 添加预定义种子
-  // for (const auto &predefined : predefined_seeds_) {
-  //   KDL::JntArray seed_array(num_joints_);
-  //   for (size_t i = 0; i < num_joints_; ++i) {
-  //     seed_array(i) = predefined[i];
-  //   }
-  //   seed_candidates.push_back(seed_array);
-  // }
-
   // 限制最大尝试次数以控制计算时间
   size_t max_attempts = std::min(seed_candidates.size(), size_t(6));
 
@@ -257,15 +239,7 @@ bool SoArm101Kinematics::GetJointLimits(
   return true;
 }
 
-void SoArm101Kinematics::SetTimeout(double timeout) {
-  timeout_ = timeout;
-  if (trac_ik_solver_ && urdf_model_) {
-    // 重新创建求解器以应用新的超时时间
-    std::string urdf_string;
-    // 从现有模型获取URDF字符串不太可行，所以我们只更新超时值
-    // 实际重新创建需要原始URDF字符串
-  }
-}
+void SoArm101Kinematics::SetTimeout(double timeout) { timeout_ = timeout; }
 
 void SoArm101Kinematics::SetTolerances(double position_tolerance,
                                        double orientation_tolerance) {
@@ -420,7 +394,7 @@ bool SoArm101Kinematics::CheckWorkspace(
 }
 
 void SoArm101Kinematics::GenerateSmartSeeds(
-    const tf2::Transform &target_transform,
+    [[maybe_unused]] const tf2::Transform &target_transform,
     const std::vector<double> &current_joints,
     std::vector<std::vector<double>> &smart_seeds) const {
   smart_seeds.clear();
@@ -439,40 +413,6 @@ void SoArm101Kinematics::GenerateSmartSeeds(
     }
     smart_seeds.push_back(perturbed);
   }
-
-  // 基于目标位置生成智能种子
-  // const tf2::Vector3 &target_pos = target_transform.getOrigin();
-
-  // // 计算基本的关节角度估计
-  // std::vector<double> position_based_seed(num_joints_, 0.0);
-  // if (num_joints_ >= 5) {
-  //   // 简单的关节角度估计
-  //   position_based_seed[0] =
-  //       std::atan2(target_pos.y(), target_pos.x()); // base rotation
-
-  //   double r = std::sqrt(target_pos.x() * target_pos.x() +
-  //                        target_pos.y() * target_pos.y());
-  //   position_based_seed[1] =
-  //       std::atan2(target_pos.z(), r) + 0.3; // shoulder lift
-  //   position_based_seed[2] = -0.5;           // elbow flex
-  //   position_based_seed[3] = 0.2;            // wrist flex
-  //   position_based_seed[4] = 0.0;            // wrist roll
-
-  //   // 确保在关节限制内
-  //   for (size_t i = 0; i < num_joints_; ++i) {
-  //     position_based_seed[i] =
-  //         std::max(joint_lower_limits_[i],
-  //                  std::min(joint_upper_limits_[i], position_based_seed[i]));
-  //   }
-  //   smart_seeds.push_back(position_based_seed);
-  // }
-
-  // 添加中位数种子
-  // std::vector<double> middle_seed(num_joints_);
-  // for (size_t i = 0; i < num_joints_; ++i) {
-  //   middle_seed[i] = (joint_lower_limits_[i] + joint_upper_limits_[i]) / 2.0;
-  // }
-  // smart_seeds.push_back(middle_seed);
 }
 
 void SoArm101Kinematics::GeneratePredefinedSeeds() {
