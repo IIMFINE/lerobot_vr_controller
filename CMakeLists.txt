@@ -46,6 +46,13 @@ install(
   DESTINATION share/${PROJECT_NAME}/launch
 )
 
+# Install Python scripts
+install(
+  PROGRAMS
+    script/reply_joint_state.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
   # Create IK test executable
   ament_auto_add_executable(ik_test_node 
