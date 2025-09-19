@@ -45,7 +45,6 @@ def generate_launch_description():
                 parameters=[
                     {"robot_description": robot_desc, "use_sim_time": use_sim_time}
                 ],
-                condition=IfCondition(use_joint_gui),
             ),
             # Joint State Publisher GUI (optional - only when not using VR control)
             Node(
