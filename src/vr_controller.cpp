@@ -1,5 +1,7 @@
 #include "vr_controller.h"
+#include "log.h"
 
+#include <chrono>
 #include <fstream>
 #include <sstream>
 #include <tf2/utils.h>
@@ -27,7 +29,7 @@ VrTfReceiver::VrTfReceiver(std::shared_ptr<rclcpp::Node> node) : node_(node) {
   joint_state_callback_group_ = node_->create_callback_group(
       rclcpp::CallbackGroupType::MutuallyExclusive);
 
-  RCLCPP_INFO(node_->get_logger(), "VrTfReceiver initialized");
+  LE_LOG_INFO << "VrTfReceiver initialized" << std::endl;
 }
 
 VrTfReceiver::~VrTfReceiver() {
@@ -41,24 +43,23 @@ VrTfReceiver::~VrTfReceiver() {
 bool VrTfReceiver::Initialize(const std::string &yaml_file_path,
                               const std::string &urdf_file_path) {
   // Perform any additional initialization steps here
-  RCLCPP_INFO(node_->get_logger(), "VrTfReceiver::Initialize() called");
+  LE_LOG_INFO << "VrTfReceiver::Initialize() called" << std::endl;
 
   // Initialize YAML configuration
   yaml_config_path_ = yaml_file_path;
   urdf_file_path_ = urdf_file_path;
 
   if (!LoadYamlConfig(yaml_config_path_)) {
-    RCLCPP_ERROR(node_->get_logger(),
-                 "Failed to load YAML configuration from: %s",
-                 yaml_config_path_.c_str());
+    LE_LOG_ERROR << "Failed to load YAML configuration from: "
+                 << yaml_config_path_ << std::endl;
     return false;
   }
 
-  RCLCPP_INFO(node_->get_logger(), "YAML configuration loaded successfully");
+  LE_LOG_INFO << "YAML configuration loaded successfully" << std::endl;
 
   // Initialize IK solvers after loading configuration
   if (!InitIkSolver()) {
-    RCLCPP_ERROR(node_->get_logger(), "Failed to initialize IK solvers");
+    LE_LOG_ERROR << "Failed to initialize IK solvers" << std::endl;
     return false;
   }
 
@@ -120,8 +121,8 @@ bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
     YAML::Node config = YAML::LoadFile(yaml_file_path);
 
     if (!config["vr_to_arm_tf"]) {
-      RCLCPP_ERROR(node_->get_logger(),
-                   "Missing 'vr_to_arm_tf' section in YAML file");
+      LE_LOG_ERROR << "Missing 'vr_to_arm_tf' section in YAML file"
+                   << std::endl;
       return false;
     }
 
@@ -130,24 +131,22 @@ bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
     // Load world frame configurations
     if (config["gripper_world_frame"]) {
       gripper_world_frame_ = config["gripper_world_frame"].as<std::string>();
-      RCLCPP_INFO(node_->get_logger(), "gripper_world_frame: %s",
-                  gripper_world_frame_.c_str());
+      LE_LOG_INFO << "gripper_world_frame: " << gripper_world_frame_
+                  << std::endl;
     } else {
       gripper_world_frame_ = "world"; // default fallback
     }
 
     if (config["vr_world_frame"]) {
       vr_world_frame_ = config["vr_world_frame"].as<std::string>();
-      RCLCPP_INFO(node_->get_logger(), "vr_world_frame: %s",
-                  vr_world_frame_.c_str());
+      LE_LOG_INFO << "vr_world_frame: " << vr_world_frame_ << std::endl;
     } else {
       vr_world_frame_ = "world"; // default fallback
     }
 
-    RCLCPP_INFO(node_->get_logger(), "Using gripper world frame: %s",
-                gripper_world_frame_.c_str());
-    RCLCPP_INFO(node_->get_logger(), "Using VR world frame: %s",
-                vr_world_frame_.c_str());
+    LE_LOG_INFO << "Using gripper world frame: " << gripper_world_frame_
+                << std::endl;
+    LE_LOG_INFO << "Using VR world frame: " << vr_world_frame_ << std::endl;
 
     // Iterate through all key-value pairs in vr_to_arm_tf
     for (auto it = tf_config.begin(); it != tf_config.end(); ++it) {
@@ -156,25 +155,24 @@ bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
 
       gripper_link_to_vr_map_[gripper_link] = vr_link;
 
-      RCLCPP_INFO(node_->get_logger(), "Loaded mapping: %s -> %s",
-                  vr_link.c_str(), gripper_link.c_str());
+      LE_LOG_INFO << "Loaded mapping: " << vr_link << " -> " << gripper_link
+                  << std::endl;
     }
 
     return true;
 
   } catch (const YAML::Exception &e) {
-    RCLCPP_ERROR(node_->get_logger(), "YAML parsing error: %s", e.what());
+    LE_LOG_ERROR << "YAML parsing error: " << e.what() << std::endl;
     return false;
   } catch (const std::exception &e) {
-    RCLCPP_ERROR(node_->get_logger(), "Error loading YAML config: %s",
-                 e.what());
+    LE_LOG_ERROR << "Error loading YAML config: " << e.what() << std::endl;
     return false;
   }
 }
 
 void VrTfReceiver::CalibrateVr2GripperTf() {
   if (!tf_buffer_ || !tf_listener_) {
-    RCLCPP_ERROR(node_->get_logger(), "TF buffer or listener not initialized");
+    LE_LOG_ERROR << "TF buffer or listener not initialized" << std::endl;
     return;
   }
 
@@ -239,22 +237,19 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
       calibrated_flag_ = true;
       should_calibrate_ = false;
 
-      RCLCPP_INFO(node_->get_logger(),
-                  "Successfully computed and published transform from %s to %s",
-                  vr_frame.c_str(), gripper_link.c_str());
+      LE_LOG_INFO << "Successfully computed and published transform from "
+                  << vr_frame << " to " << gripper_link << std::endl;
 
     } catch (const tf2::TransformException &ex) {
-      RCLCPP_ERROR(node_->get_logger(),
-                   "Failed to get transform for gripper_link: %s, vr_frame: "
-                   "%s. Error: %s",
-                   gripper_link.c_str(), vr_frame.c_str(), ex.what());
+      LE_LOG_ERROR << "Failed to get transform for gripper_link: "
+                   << gripper_link << ", vr_frame: " << vr_frame
+                   << ". Error: " << ex.what() << std::endl;
     }
   }
 
   if (!vr_base_link_dummy_tf_.empty()) {
-    RCLCPP_INFO(node_->get_logger(),
-                "Successfully computed %zu VR to gripper transformations",
-                vr_base_link_dummy_tf_.size());
+    LE_LOG_INFO << "Successfully computed " << vr_base_link_dummy_tf_.size()
+                << " VR to gripper transformations" << std::endl;
   }
 }
 
@@ -320,10 +315,7 @@ void VrTfReceiver::Vr2GripperTfPublish() {
       tf_broadcaster_->sendTransform(calibrated_transform);
     } catch (const std::exception &ex) {
       // Silently continue if transform not available
-      RCLCPP_WARN(node_->get_logger(),
-                  "Skipping publish for gripper_link: %s, vr_frame: %s. Error: "
-                  "%s",
-                  gripper_link.c_str(), vr_frame.c_str(), ex.what());
+      // 减少频繁的警告日志输出
     }
   }
 }
@@ -378,8 +370,7 @@ void VrTfReceiver::JoystickCallback(
   // Check if buttons array has at least 6 elements (index 5)
   if (msg->buttons.size() > 5 && msg->buttons[5] != 0) {
     should_calibrate_ = true;
-    RCLCPP_INFO(node_->get_logger(),
-                "Calibration triggered by joystick button 5");
+    LE_LOG_INFO << "Calibration triggered by joystick button 5" << std::endl;
   }
 }
 
@@ -387,8 +378,8 @@ bool VrTfReceiver::InitIkSolver() {
   // Read URDF file content
   std::ifstream urdf_file(urdf_file_path_);
   if (!urdf_file.is_open()) {
-    RCLCPP_ERROR(node_->get_logger(), "Failed to open URDF file: %s",
-                 urdf_file_path_.c_str());
+    LE_LOG_ERROR << "Failed to open URDF file: " << urdf_file_path_
+                 << std::endl;
     return false;
   }
 
@@ -397,22 +388,20 @@ bool VrTfReceiver::InitIkSolver() {
   urdf_file.close();
 
   if (urdf_string.empty()) {
-    RCLCPP_ERROR(node_->get_logger(), "URDF file is empty: %s",
-                 urdf_file_path_.c_str());
+    LE_LOG_ERROR << "URDF file is empty: " << urdf_file_path_ << std::endl;
     return false;
   }
 
-  RCLCPP_INFO(node_->get_logger(), "Successfully loaded URDF file: %s",
-              urdf_file_path_.c_str());
+  LE_LOG_INFO << "Successfully loaded URDF file: " << urdf_file_path_
+              << std::endl;
 
   // Clear any existing solvers before initializing new ones
   ik_solvers_.clear();
 
   // Initialize one IK solver for each gripper link
   size_t gripper_count = gripper_link_to_vr_map_.size();
-  RCLCPP_INFO(node_->get_logger(),
-              "Initializing %zu IK solvers for %zu grippers", gripper_count,
-              gripper_count);
+  LE_LOG_INFO << "Initializing " << gripper_count << " IK solvers for "
+              << gripper_count << " grippers" << std::endl;
 
   for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
     auto ik_solver = std::make_unique<SoArm101Kinematics>();
@@ -421,9 +410,8 @@ bool VrTfReceiver::InitIkSolver() {
       // Use gripper_world_frame_ as base_link and gripper_link as tip_link
       if (!ik_solver->Initialize(urdf_string, gripper_world_frame_,
                                  gripper_link)) {
-        RCLCPP_ERROR(node_->get_logger(),
-                     "Failed to initialize IK solver for gripper link: %s",
-                     gripper_link.c_str());
+        LE_LOG_ERROR << "Failed to initialize IK solver for gripper link: "
+                     << gripper_link << std::endl;
         // Clear all solvers on failure
         ik_solvers_.clear();
         return false;
@@ -432,17 +420,16 @@ bool VrTfReceiver::InitIkSolver() {
       // Store the initialized solver
       ik_solvers_[gripper_link] = std::move(ik_solver);
 
-      RCLCPP_INFO(node_->get_logger(),
-                  "IK solver %zu/%zu initialized successfully for gripper "
-                  "link: %s with %zu joints (relaxed precision)",
-                  ik_solvers_.size(), gripper_count, gripper_link.c_str(),
-                  ik_solvers_[gripper_link]->GetNumJoints());
+      LE_LOG_INFO << "IK solver " << ik_solvers_.size() << "/" << gripper_count
+                  << " initialized successfully for gripper link: "
+                  << gripper_link << " with "
+                  << ik_solvers_[gripper_link]->GetNumJoints()
+                  << " joints (relaxed precision)" << std::endl;
 
     } catch (const std::exception &e) {
-      RCLCPP_ERROR(
-          node_->get_logger(),
-          "Exception during IK solver initialization for gripper link %s: %s",
-          gripper_link.c_str(), e.what());
+      LE_LOG_ERROR
+          << "Exception during IK solver initialization for gripper link "
+          << gripper_link << ": " << e.what() << std::endl;
       // Clear all solvers on failure
       ik_solvers_.clear();
       return false;
@@ -450,29 +437,26 @@ bool VrTfReceiver::InitIkSolver() {
   }
 
   if (ik_solvers_.empty()) {
-    RCLCPP_ERROR(node_->get_logger(),
-                 "No gripper links found in configuration");
+    LE_LOG_ERROR << "No gripper links found in configuration" << std::endl;
     return false;
   }
 
   // Verify we have exactly the same number of IK solvers as grippers
   if (ik_solvers_.size() != gripper_link_to_vr_map_.size()) {
-    RCLCPP_ERROR(node_->get_logger(),
-                 "Mismatch: Expected %zu IK solvers but got %zu",
-                 gripper_link_to_vr_map_.size(), ik_solvers_.size());
+    LE_LOG_ERROR << "Mismatch: Expected " << gripper_link_to_vr_map_.size()
+                 << " IK solvers but got " << ik_solvers_.size() << std::endl;
     ik_solvers_.clear();
     return false;
   }
 
-  RCLCPP_INFO(node_->get_logger(),
-              "Successfully initialized %zu IK solvers for %zu grippers",
-              ik_solvers_.size(), gripper_link_to_vr_map_.size());
+  LE_LOG_INFO << "Successfully initialized " << ik_solvers_.size()
+              << " IK solvers for " << gripper_link_to_vr_map_.size()
+              << " grippers" << std::endl;
 
   // Log all initialized gripper-solver pairs
   for (const auto &[gripper_link, solver] : ik_solvers_) {
-    RCLCPP_INFO(node_->get_logger(),
-                "Gripper '%s' -> IK solver with %zu joints",
-                gripper_link.c_str(), solver->GetNumJoints());
+    LE_LOG_INFO << "Gripper '" << gripper_link << "' -> IK solver with "
+                << solver->GetNumJoints() << " joints" << std::endl;
   }
 
   return true;
@@ -485,17 +469,15 @@ bool VrTfReceiver::IkGripperTf(const std::string &gripper_link,
   // Find the IK solver for this gripper link
   auto it = ik_solvers_.find(gripper_link);
   if (it == ik_solvers_.end()) {
-    RCLCPP_ERROR(node_->get_logger(),
-                 "IK solver not found for gripper link: %s",
-                 gripper_link.c_str());
+    LE_LOG_ERROR << "IK solver not found for gripper link: " << gripper_link
+                 << std::endl;
     return false;
   }
 
   auto &ik_solver = it->second;
   if (!ik_solver || !ik_solver->IsInitialized()) {
-    RCLCPP_ERROR(node_->get_logger(),
-                 "IK solver not initialized for gripper link: %s",
-                 gripper_link.c_str());
+    LE_LOG_ERROR << "IK solver not initialized for gripper link: "
+                 << gripper_link << std::endl;
     return false;
   }
 
@@ -507,9 +489,16 @@ bool VrTfReceiver::IkGripperTf(const std::string &gripper_link,
     return false;
 
   } catch (const std::exception &e) {
-    RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-                         "Exception during IK solving for gripper link %s: %s",
-                         gripper_link.c_str(), e.what());
+    // 减少频繁的警告日志输出 - 每秒最多输出一次
+    static auto last_warn_time = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now -
+                                                              last_warn_time)
+            .count() > 1000) {
+      LE_LOG_ERROR << "Exception during IK solving for gripper link "
+                   << gripper_link << ": " << e.what() << std::endl;
+      last_warn_time = now;
+    }
     return false;
   }
 }
@@ -567,9 +556,16 @@ void VrTfReceiver::ControlJointWithEe(
     // Find the IK solver for this gripper link to use AlignJointStateToIk
     auto ik_it = ik_solvers_.find(gripper_link);
     if (ik_it == ik_solvers_.end()) {
-      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
-                           "IK solver not found for gripper link: %s",
-                           gripper_link.c_str());
+      // 减少频繁的警告日志输出 - 每5秒最多输出一次
+      static auto last_warn_time = std::chrono::steady_clock::now();
+      auto now = std::chrono::steady_clock::now();
+      if (std::chrono::duration_cast<std::chrono::milliseconds>(now -
+                                                                last_warn_time)
+              .count() > 5000) {
+        LE_LOG_ERROR << "IK solver not found for gripper link: " << gripper_link
+                     << std::endl;
+        last_warn_time = now;
+      }
       continue;
     }
 
@@ -624,24 +620,22 @@ sensor_msgs::msg::JointState VrTfReceiver::GetLatestJointState() const {
 void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
                                    const std::vector<double> &joint_solution) {
   if (!joint_state_publisher_) {
-    RCLCPP_WARN(node_->get_logger(), "Joint command publisher not initialized");
+    LE_LOG_ERROR << "Joint command publisher not initialized" << std::endl;
     return;
   }
 
   // Find the IK solver for this gripper link to get joint names
   auto ik_it = ik_solvers_.find(gripper_link);
   if (ik_it == ik_solvers_.end()) {
-    RCLCPP_ERROR(node_->get_logger(),
-                 "IK solver not found for gripper link: %s",
-                 gripper_link.c_str());
+    LE_LOG_ERROR << "IK solver not found for gripper link: " << gripper_link
+                 << std::endl;
     return;
   }
 
   auto &ik_solver = ik_it->second;
   if (!ik_solver || !ik_solver->IsInitialized()) {
-    RCLCPP_ERROR(node_->get_logger(),
-                 "IK solver not initialized for gripper link: %s",
-                 gripper_link.c_str());
+    LE_LOG_ERROR << "IK solver not initialized for gripper link: "
+                 << gripper_link << std::endl;
     return;
   }
 
@@ -650,11 +644,9 @@ void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
 
   // Verify joint solution size matches joint names size
   if (joint_solution.size() != joint_names.size()) {
-    RCLCPP_ERROR(node_->get_logger(),
-                 "Joint solution size (%zu) doesn't match joint names size "
-                 "(%zu) for gripper: %s",
-                 joint_solution.size(), joint_names.size(),
-                 gripper_link.c_str());
+    LE_LOG_ERROR << "Joint solution size (" << joint_solution.size()
+                 << ") doesn't match joint names size (" << joint_names.size()
+                 << ") for gripper: " << gripper_link << std::endl;
     return;
   }
 
@@ -674,14 +666,17 @@ void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
   // Publish the joint command
   joint_state_publisher_->publish(joint_state_msg);
 
-  RCLCPP_DEBUG(node_->get_logger(),
-               "Published joint command with %zu joints for gripper: %s",
-               joint_solution.size(), gripper_link.c_str());
+  // 减少DEBUG级别的日志输出频率
+  static int debug_counter = 0;
+  if (++debug_counter % 100 == 0) { // 每100次输出一次
+    LE_LOG_INFO << "Published joint command with " << joint_solution.size()
+                << " joints for gripper: " << gripper_link << std::endl;
+  }
 }
 
 void VrTfReceiver::PublishZeroJointStates() {
   if (!joint_state_publisher_) {
-    RCLCPP_WARN(node_->get_logger(), "Joint command publisher not initialized");
+    LE_LOG_ERROR << "Joint command publisher not initialized" << std::endl;
     return;
   }
 
@@ -712,9 +707,13 @@ void VrTfReceiver::PublishZeroJointStates() {
   // Publish the joint command with all zeros
   joint_state_publisher_->publish(joint_state_msg);
 
-  RCLCPP_DEBUG(node_->get_logger(),
-               "Published zero joint command with %zu joints for simulation",
-               joint_state_msg.name.size());
+  // 减少DEBUG级别的日志输出频率
+  static int debug_counter = 0;
+  if (++debug_counter % 50 == 0) { // 每50次输出一次
+    LE_LOG_INFO << "Published zero joint command with "
+                << joint_state_msg.name.size() << " joints for simulation"
+                << std::endl;
+  }
 }
 
 } // namespace lerobot_vr_controller
