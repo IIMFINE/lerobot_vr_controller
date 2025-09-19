@@ -1,5 +1,5 @@
-#ifndef LEROBOT_VR_CONTROLLER_IK_H_
-#define LEROBOT_VR_CONTROLLER_IK_H_
+#ifndef LEROBOT_VR_CONTROLLER_KINEMATICS_H_
+#define LEROBOT_VR_CONTROLLER_KINEMATICS_H_
 
 #include <iostream>
 #include <map>
@@ -201,4 +201,4 @@ private:
 
 } // namespace lerobot_vr_controller
 
-#endif // LEROBOT_VR_CONTROLLER_IK_H_
+#endif // LEROBOT_VR_CONTROLLER_KINEMATICS_H_
