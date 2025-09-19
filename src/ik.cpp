@@ -10,7 +10,7 @@
 namespace lerobot_vr_controller {
 
 SoArm101Kinematics::SoArm101Kinematics()
-    : timeout_(0.01), position_tolerance_(0.01), orientation_tolerance_(0.5),
+    : timeout_(0.01), position_tolerance_(0.02), orientation_tolerance_(0.8),
       num_joints_(0), initialized_(false), last_solution_cache_(0) {
   LE_LOG_INFO << "SoArm101Kinematics initialized with default tolerances"
               << std::endl;
@@ -53,8 +53,9 @@ bool SoArm101Kinematics::Initialize(const std::string &urdf_string,
 
   // 初始化TRAC-IK求解器，使用优化配置
   trac_ik_solver_ = std::make_unique<TRAC_IK::TRAC_IK>(
-      base_link_, tip_link_, urdf_string, timeout_, position_tolerance_,
-      TRAC_IK::Manip1); // 使用Speed类型求解
+      base_link_, tip_link_, urdf_string, timeout_,
+      1e-5,               // 构造函数中的公差参数优先级较低
+      TRAC_IK::Distance); // 使用Distance类型求解，以最小化关节空间跳变
 
   if (!trac_ik_solver_->getKDLChain(kinematic_chain_)) {
     LE_LOG_ERROR << "Failed to get KDL chain from TRAC-IK" << std::endl;
@@ -156,22 +157,22 @@ bool SoArm101Kinematics::SolveIK(const tf2::Transform &target_transform,
   }
 
   // 使用提供的种子
-  if (!seed_joints.empty() && seed_joints.size() == num_joints_) {
-    KDL::JntArray provided_seed(num_joints_);
-    for (size_t i = 0; i < num_joints_; ++i) {
-      provided_seed(i) = seed_joints[i];
-    }
-    seed_candidates.insert(seed_candidates.begin(), provided_seed);
-  }
+  // if (!seed_joints.empty() && seed_joints.size() == num_joints_) {
+  //   KDL::JntArray provided_seed(num_joints_);
+  //   for (size_t i = 0; i < num_joints_; ++i) {
+  //     provided_seed(i) = seed_joints[i];
+  //   }
+  //   seed_candidates.insert(seed_candidates.begin(), provided_seed);
+  // }
 
   // 添加预定义种子
-  for (const auto &predefined : predefined_seeds_) {
-    KDL::JntArray seed_array(num_joints_);
-    for (size_t i = 0; i < num_joints_; ++i) {
-      seed_array(i) = predefined[i];
-    }
-    seed_candidates.push_back(seed_array);
-  }
+  // for (const auto &predefined : predefined_seeds_) {
+  //   KDL::JntArray seed_array(num_joints_);
+  //   for (size_t i = 0; i < num_joints_; ++i) {
+  //     seed_array(i) = predefined[i];
+  //   }
+  //   seed_candidates.push_back(seed_array);
+  // }
 
   // 限制最大尝试次数以控制计算时间
   size_t max_attempts = std::min(seed_candidates.size(), size_t(6));
@@ -423,7 +424,6 @@ void SoArm101Kinematics::GenerateSmartSeeds(
     const std::vector<double> &current_joints,
     std::vector<std::vector<double>> &smart_seeds) const {
   smart_seeds.clear();
-  smart_seeds.reserve(4);
 
   // 如果有当前关节状态，优先使用
   if (!current_joints.empty() && current_joints.size() == num_joints_) {
@@ -441,38 +441,38 @@ void SoArm101Kinematics::GenerateSmartSeeds(
   }
 
   // 基于目标位置生成智能种子
-  const tf2::Vector3 &target_pos = target_transform.getOrigin();
+  // const tf2::Vector3 &target_pos = target_transform.getOrigin();
 
-  // 计算基本的关节角度估计
-  std::vector<double> position_based_seed(num_joints_, 0.0);
-  if (num_joints_ >= 5) {
-    // 简单的关节角度估计
-    position_based_seed[0] =
-        std::atan2(target_pos.y(), target_pos.x()); // base rotation
+  // // 计算基本的关节角度估计
+  // std::vector<double> position_based_seed(num_joints_, 0.0);
+  // if (num_joints_ >= 5) {
+  //   // 简单的关节角度估计
+  //   position_based_seed[0] =
+  //       std::atan2(target_pos.y(), target_pos.x()); // base rotation
 
-    double r = std::sqrt(target_pos.x() * target_pos.x() +
-                         target_pos.y() * target_pos.y());
-    position_based_seed[1] =
-        std::atan2(target_pos.z(), r) + 0.3; // shoulder lift
-    position_based_seed[2] = -0.5;           // elbow flex
-    position_based_seed[3] = 0.2;            // wrist flex
-    position_based_seed[4] = 0.0;            // wrist roll
+  //   double r = std::sqrt(target_pos.x() * target_pos.x() +
+  //                        target_pos.y() * target_pos.y());
+  //   position_based_seed[1] =
+  //       std::atan2(target_pos.z(), r) + 0.3; // shoulder lift
+  //   position_based_seed[2] = -0.5;           // elbow flex
+  //   position_based_seed[3] = 0.2;            // wrist flex
+  //   position_based_seed[4] = 0.0;            // wrist roll
 
-    // 确保在关节限制内
-    for (size_t i = 0; i < num_joints_; ++i) {
-      position_based_seed[i] =
-          std::max(joint_lower_limits_[i],
-                   std::min(joint_upper_limits_[i], position_based_seed[i]));
-    }
-    smart_seeds.push_back(position_based_seed);
-  }
+  //   // 确保在关节限制内
+  //   for (size_t i = 0; i < num_joints_; ++i) {
+  //     position_based_seed[i] =
+  //         std::max(joint_lower_limits_[i],
+  //                  std::min(joint_upper_limits_[i], position_based_seed[i]));
+  //   }
+  //   smart_seeds.push_back(position_based_seed);
+  // }
 
   // 添加中位数种子
-  std::vector<double> middle_seed(num_joints_);
-  for (size_t i = 0; i < num_joints_; ++i) {
-    middle_seed[i] = (joint_lower_limits_[i] + joint_upper_limits_[i]) / 2.0;
-  }
-  smart_seeds.push_back(middle_seed);
+  // std::vector<double> middle_seed(num_joints_);
+  // for (size_t i = 0; i < num_joints_; ++i) {
+  //   middle_seed[i] = (joint_lower_limits_[i] + joint_upper_limits_[i]) / 2.0;
+  // }
+  // smart_seeds.push_back(middle_seed);
 }
 
 void SoArm101Kinematics::GeneratePredefinedSeeds() {
