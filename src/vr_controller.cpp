@@ -644,10 +644,6 @@ void VrTfReceiver::ControlJointWithEe(
   }
 }
 
-void VrTfReceiver::EePoseIktoJointCmd() {
-  // TODO: implement conversion from EE targets to joint commands
-}
-
 void VrTfReceiver::UpdateJointState(
     const sensor_msgs::msg::JointState::SharedPtr msg) {
   // Parse joints in the message and check against each IK solver's joint names

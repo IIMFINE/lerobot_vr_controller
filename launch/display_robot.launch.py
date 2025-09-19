@@ -36,16 +36,17 @@ def generate_launch_description():
                 default_value="false",
                 description="Launch joint state publisher GUI for manual control",
             ),
-            # Robot State Publisher
-            # Node(
-            #     package="robot_state_publisher",
-            #     executable="robot_state_publisher",
-            #     name="robot_state_publisher",
-            #     output="screen",
-            #     parameters=[
-            #         {"robot_description": robot_desc, "use_sim_time": use_sim_time}
-            #     ],
-            # ),
+            # Robot State Publisher (only when using joint GUI)
+            Node(
+                package="robot_state_publisher",
+                executable="robot_state_publisher",
+                name="robot_state_publisher",
+                output="screen",
+                parameters=[
+                    {"robot_description": robot_desc, "use_sim_time": use_sim_time}
+                ],
+                condition=IfCondition(use_joint_gui),
+            ),
             # Joint State Publisher GUI (optional - only when not using VR control)
             Node(
                 package="joint_state_publisher_gui",
