@@ -34,7 +34,7 @@ VrTfReceiver::VrTfReceiver(std::shared_ptr<rclcpp::Node> node) : node_(node) {
 
 VrTfReceiver::~VrTfReceiver() {
   ee_to_joint_worker_running_ = false;
-  target_ee_pose_cond_.notify_all();
+  target_ee_pose_queue_cond_.notify_all();
   if (ee_to_joint_worker_.joinable()) {
     ee_to_joint_worker_.join();
   }
@@ -147,6 +147,41 @@ bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
     LE_LOG_INFO << "Using gripper world frame: " << gripper_world_frame_
                 << std::endl;
     LE_LOG_INFO << "Using VR world frame: " << vr_world_frame_ << std::endl;
+
+    // Load IK tolerance configurations
+    if (config["ik_tolerances"]) {
+      auto tolerance_config = config["ik_tolerances"];
+
+      if (tolerance_config["position_tolerance"]) {
+        position_tolerance_ =
+            tolerance_config["position_tolerance"].as<double>();
+        LE_LOG_INFO << "Loaded position_tolerance: " << position_tolerance_
+                    << std::endl;
+      } else {
+        position_tolerance_ = 0.01; // default value
+        LE_LOG_INFO << "Using default position_tolerance: "
+                    << position_tolerance_ << std::endl;
+      }
+
+      if (tolerance_config["orientation_tolerance"]) {
+        orientation_tolerance_ =
+            tolerance_config["orientation_tolerance"].as<double>();
+        LE_LOG_INFO << "Loaded orientation_tolerance: "
+                    << orientation_tolerance_ << std::endl;
+      } else {
+        orientation_tolerance_ = 0.5; // default value
+        LE_LOG_INFO << "Using default orientation_tolerance: "
+                    << orientation_tolerance_ << std::endl;
+      }
+    } else {
+      // Use default values if ik_tolerances section is missing
+      position_tolerance_ = 0.01;
+      orientation_tolerance_ = 0.5;
+      LE_LOG_INFO
+          << "ik_tolerances section not found, using defaults - Position: "
+          << position_tolerance_ << ", Orientation: " << orientation_tolerance_
+          << std::endl;
+    }
 
     // Iterate through all key-value pairs in vr_to_arm_tf
     for (auto it = tf_config.begin(); it != tf_config.end(); ++it) {
@@ -357,7 +392,7 @@ void VrTfReceiver::Vr2GripperTfEnqueue() {
           queue.pop_front();
         }
       }
-      target_ee_pose_cond_.notify_one();
+      target_ee_pose_queue_cond_.notify_one();
     } catch (const std::exception &e) {
       // RCLCPP_WARN(node_->get_logger(), "Failed for %s <- %s: %s",
       //             gripper_link.c_str(), vr_frame.c_str(), e.what());
@@ -419,6 +454,10 @@ bool VrTfReceiver::InitIkSolver() {
 
       // Store the initialized solver
       ik_solvers_[gripper_link] = std::move(ik_solver);
+
+      // Set the tolerances loaded from YAML configuration
+      ik_solvers_[gripper_link]->SetTolerances(position_tolerance_,
+                                               orientation_tolerance_);
 
       LE_LOG_INFO << "IK solver " << ik_solvers_.size() << "/" << gripper_count
                   << " initialized successfully for gripper link: "
@@ -508,7 +547,7 @@ void VrTfReceiver::EeToJointWorkerLoop() {
     // Wait until there's work or shutdown
     {
       std::unique_lock<std::mutex> lock(target_ee_pose_queue_mutex_);
-      target_ee_pose_cond_.wait(lock, [this] {
+      target_ee_pose_queue_cond_.wait(lock, [this] {
         if (!ee_to_joint_worker_running_)
           return true;
         for (const auto &kv : target_ee_pose_queue_) {
@@ -671,48 +710,6 @@ void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
   if (++debug_counter % 100 == 0) { // 每100次输出一次
     LE_LOG_INFO << "Published joint command with " << joint_solution.size()
                 << " joints for gripper: " << gripper_link << std::endl;
-  }
-}
-
-void VrTfReceiver::PublishZeroJointStates() {
-  if (!joint_state_publisher_) {
-    LE_LOG_ERROR << "Joint command publisher not initialized" << std::endl;
-    return;
-  }
-
-  // Create joint command message with all joints set to zero
-  sensor_msgs::msg::JointState joint_state_msg;
-  joint_state_msg.header.stamp = node_->now();
-  joint_state_msg.header.frame_id =
-      gripper_world_frame_.empty() ? "world" : gripper_world_frame_;
-
-  // Iterate through all IK solvers to get all joint names
-  for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
-    if (!ik_solver || !ik_solver->IsInitialized()) {
-      continue;
-    }
-
-    // Get joint names from the IK solver
-    std::vector<std::string> joint_names = ik_solver->GetJointNames();
-
-    // Add joint names and zero positions
-    for (const auto &joint_name : joint_names) {
-      joint_state_msg.name.push_back(joint_name);
-      joint_state_msg.position.push_back(0.0);
-      joint_state_msg.velocity.push_back(0.0);
-      joint_state_msg.effort.push_back(0.0);
-    }
-  }
-
-  // Publish the joint command with all zeros
-  joint_state_publisher_->publish(joint_state_msg);
-
-  // 减少DEBUG级别的日志输出频率
-  static int debug_counter = 0;
-  if (++debug_counter % 50 == 0) { // 每50次输出一次
-    LE_LOG_INFO << "Published zero joint command with "
-                << joint_state_msg.name.size() << " joints for simulation"
-                << std::endl;
   }
 }
 
