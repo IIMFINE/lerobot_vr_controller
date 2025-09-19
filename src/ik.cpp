@@ -12,7 +12,7 @@ namespace lerobot_vr_controller {
 SoArm101Kinematics::SoArm101Kinematics()
     : timeout_(0.01), position_tolerance_(0.01), orientation_tolerance_(0.5),
       num_joints_(0), initialized_(false), last_solution_cache_(0) {
-  LE_LOG_INFO << "SoArm101Kinematics initialized with optimized tolerances"
+  LE_LOG_INFO << "SoArm101Kinematics initialized with default tolerances"
               << std::endl;
 }
 
@@ -264,6 +264,15 @@ void SoArm101Kinematics::SetTimeout(double timeout) {
     // 从现有模型获取URDF字符串不太可行，所以我们只更新超时值
     // 实际重新创建需要原始URDF字符串
   }
+}
+
+void SoArm101Kinematics::SetTolerances(double position_tolerance,
+                                       double orientation_tolerance) {
+  position_tolerance_ = position_tolerance;
+  orientation_tolerance_ = orientation_tolerance;
+
+  LE_LOG_INFO << "Updated IK tolerances - Position: " << position_tolerance_
+              << ", Orientation: " << orientation_tolerance_ << std::endl;
 }
 
 bool SoArm101Kinematics::IsInitialized() const { return initialized_; }

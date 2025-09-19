@@ -90,9 +90,6 @@ private:
   void PublishJointCmd(const std::string &gripper_link,
                        const std::vector<double> &joint_solution);
 
-  // Publish zero joint commands for simulation mode
-  void PublishZeroJointStates();
-
   // Node pointer passed from main
   std::shared_ptr<rclcpp::Node> node_;
 
@@ -138,7 +135,7 @@ private:
 
   // Mutex + condition variable for target_ee_pose_queue_
   mutable std::mutex target_ee_pose_queue_mutex_;
-  std::condition_variable target_ee_pose_cond_;
+  std::condition_variable target_ee_pose_queue_cond_;
 
   std::map<std::string, tf2::Quaternion> vr_wrist_to_gripper_rot_;
 
@@ -166,6 +163,10 @@ private:
 
   // IK solvers for each gripper link
   std::map<std::string, std::unique_ptr<SoArm101Kinematics>> ik_solvers_;
+
+  // IK tolerance configurations loaded from YAML
+  double position_tolerance_;
+  double orientation_tolerance_;
 
   // Dedicated worker thread to process EE targets into joint commands
   std::atomic<bool> ee_to_joint_worker_running_{false};

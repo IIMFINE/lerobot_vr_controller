@@ -96,6 +96,13 @@ public:
   void SetTimeout(double timeout);
 
   /**
+   * @brief 设置IK求解容忍度
+   * @param position_tolerance 位置容忍度（米）
+   * @param orientation_tolerance 方向容忍度（弧度）
+   */
+  void SetTolerances(double position_tolerance, double orientation_tolerance);
+
+  /**
    * @brief 检查是否已初始化
    * @return 初始化状态
    */
