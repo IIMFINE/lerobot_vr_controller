@@ -160,6 +160,12 @@ private:
    */
   bool LoadURDF(const std::string &urdf_string);
 
+  // 智能种子生成
+  void GenerateSmartSeeds(const tf2::Transform &target_transform,
+                          const std::vector<double> &current_joints,
+                          std::vector<std::vector<double>> &smart_seeds) const;
+  void GeneratePredefinedSeeds();
+
   // TRAC-IK求解器
   std::unique_ptr<TRAC_IK::TRAC_IK> trac_ik_solver_;
 
@@ -191,10 +197,6 @@ private:
 
   // 智能种子生成
   std::vector<std::vector<double>> predefined_seeds_;
-  void GenerateSmartSeeds(const tf2::Transform &target_transform,
-                          const std::vector<double> &current_joints,
-                          std::vector<std::vector<double>> &smart_seeds) const;
-  void GeneratePredefinedSeeds();
 };
 
 } // namespace lerobot_vr_controller

@@ -1,6 +1,7 @@
 #include "vr_controller.h"
 #include "log.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <sstream>
@@ -590,7 +591,8 @@ void VrTfReceiver::ControlJointWithEe(
     size_t start_idx = pose_queue.size() - poses_to_process;
 
     // Get current joint state as seed for IK
-    sensor_msgs::msg::JointState current_joint_state = GetLatestJointState();
+    sensor_msgs::msg::JointState current_joint_state =
+        GetLatestJointState(gripper_link);
 
     // Find the IK solver for this gripper link to use AlignJointStateToIk
     auto ik_it = ik_solvers_.find(gripper_link);
@@ -648,12 +650,72 @@ void VrTfReceiver::EePoseIktoJointCmd() {
 
 void VrTfReceiver::UpdateJointState(
     const sensor_msgs::msg::JointState::SharedPtr msg) {
-  // Store the latest joint state
-  latest_joint_state_ = *msg;
+  // Parse joints in the message and check against each IK solver's joint names
+  for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
+    if (!ik_solver || !ik_solver->IsInitialized()) {
+      continue;
+    }
+
+    // Get joint names from the IK solver
+    std::vector<std::string> solver_joint_names = ik_solver->GetJointNames();
+
+    // Check if all joints from the solver are present in the message
+    bool all_joints_found = true;
+    std::vector<size_t> joint_indices;
+
+    std::for_each(
+        solver_joint_names.begin(), solver_joint_names.end(),
+        [&](const std::string &joint_name) {
+          auto it = std::find_if(msg->name.begin(), msg->name.end(),
+                                 [&joint_name](const std::string &name) {
+                                   return name == joint_name;
+                                 });
+          if (it == msg->name.end()) {
+            all_joints_found = false;
+            return;
+          }
+          joint_indices.push_back(std::distance(msg->name.begin(), it));
+        });
+
+    // If all joints are found, store the message for this gripper_link
+    if (all_joints_found) {
+      // Create a new joint state message with only the relevant joints
+      sensor_msgs::msg::JointState filtered_joint_state;
+      filtered_joint_state.header = msg->header;
+
+      for (size_t idx : joint_indices) {
+        filtered_joint_state.name.push_back(msg->name[idx]);
+        filtered_joint_state.position.push_back(msg->position[idx]);
+
+        // Copy velocity and effort if available
+        if (idx < msg->velocity.size()) {
+          filtered_joint_state.velocity.push_back(msg->velocity[idx]);
+        }
+        if (idx < msg->effort.size()) {
+          filtered_joint_state.effort.push_back(msg->effort[idx]);
+        }
+      }
+
+      // Store the filtered joint state for this gripper
+      {
+        std::unique_lock<std::shared_mutex> lock(latest_joint_state_map_mutex_);
+        latest_joint_state_map_[gripper_link] = filtered_joint_state;
+      }
+    }
+  }
 }
 
-sensor_msgs::msg::JointState VrTfReceiver::GetLatestJointState() const {
-  return latest_joint_state_;
+sensor_msgs::msg::JointState
+VrTfReceiver::GetLatestJointState(const std::string &gripper_link) const {
+  std::shared_lock<std::shared_mutex> lock(latest_joint_state_map_mutex_);
+  auto it = latest_joint_state_map_.find(gripper_link);
+  if (it != latest_joint_state_map_.end()) {
+    return it->second;
+  }
+
+  // Return empty joint state if gripper_link not found
+  sensor_msgs::msg::JointState empty_joint_state;
+  return empty_joint_state;
 }
 
 void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,

@@ -42,8 +42,9 @@ public:
   // Start receiving VR data
   void Start();
 
-  // Get the latest joint state snapshot
-  sensor_msgs::msg::JointState GetLatestJointState() const;
+  // Get the latest joint state snapshot for a specific gripper
+  sensor_msgs::msg::JointState
+  GetLatestJointState(const std::string &gripper_link) const;
 
 private:
   bool InitIkSolver();
@@ -155,7 +156,10 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr
       joint_state_subscriber_;
 
-  sensor_msgs::msg::JointState latest_joint_state_;
+  std::map<std::string, sensor_msgs::msg::JointState> latest_joint_state_map_;
+
+  // Shared mutex for thread-safe access to latest_joint_state_map_
+  mutable std::shared_mutex latest_joint_state_map_mutex_;
 
   // Joint command publisher for rviz2 visualization
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr
