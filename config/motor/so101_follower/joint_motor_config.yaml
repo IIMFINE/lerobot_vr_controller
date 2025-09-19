@@ -1,4 +1,4 @@
-joint_state:
+joint_motor_pos_mapping:
   shoulder_pan:
     motor_pos: 2047
     joint_pos: 0
@@ -17,3 +17,12 @@ joint_state:
   gripper:
     motor_pos: 2047
     joint_pos: 0
+
+#1 radian = 651.89 motor position increment
+joint_to_motor_scale:
+  shoulder_pan: 651.89
+  shoulder_lift: 651.89
+  elbow_flex: 651.89
+  wrist_flex: 651.89
+  wrist_roll: 651.89
+  gripper: 651.89
