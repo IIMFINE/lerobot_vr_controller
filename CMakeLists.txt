@@ -20,8 +20,8 @@ find_package(yaml-cpp REQUIRED)
 ament_auto_add_executable(${PROJECT_NAME}_node 
   src/main.cpp 
   src/vr_controller.cpp 
-  src/ik.cpp
-  src/joint_motor_control.cpp
+  src/kinematics.cpp
+  src/joint_motor_convert.cpp
 )
 
 # Include header files

@@ -1,5 +1,6 @@
 #include "joint_motor_convert.h"
 
+#include "log.h"
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -16,8 +17,8 @@ JointMotorControl::JointMotorControl(
     const std::string &config_file_path,
     const std::string &motor_calibration_file_path) {
   if (!LoadConfiguration(config_file_path)) {
-    std::cerr << "Failed to load configuration from: " << config_file_path
-              << std::endl;
+    LE_LOG_ERROR << "Failed to load configuration from: " << config_file_path
+                 << std::endl;
   }
 
   // Load motor calibration file
@@ -33,8 +34,8 @@ double JointMotorControl::JointToMotorPosition(const std::string &joint_name,
 
   if (mapping_it == joint_motor_mappings_.end() ||
       scale_it == joint_motor_scales_.end()) {
-    std::cerr << "Joint " << joint_name << " not found in configuration"
-              << std::endl;
+    LE_LOG_ERROR << "Joint " << joint_name << " not found in configuration"
+                 << std::endl;
     return 0.0;
   }
 
@@ -56,8 +57,8 @@ double JointMotorControl::MotorToJointPosition(const std::string &joint_name,
 
   if (mapping_it == joint_motor_mappings_.end() ||
       scale_it == joint_motor_scales_.end()) {
-    std::cerr << "Joint " << joint_name << " not found in configuration"
-              << std::endl;
+    LE_LOG_ERROR << "Joint " << joint_name << " not found in configuration"
+                 << std::endl;
     return 0.0;
   }
 
@@ -91,8 +92,8 @@ bool JointMotorControl::GetMotorRange(const std::string &joint_name,
                                       int &range_min, int &range_max) const {
   auto it = motor_calibrations_.find(joint_name);
   if (it == motor_calibrations_.end()) {
-    std::cerr << "Motor calibration for joint " << joint_name << " not found"
-              << std::endl;
+    LE_LOG_ERROR << "Motor calibration for joint " << joint_name << " not found"
+                 << std::endl;
     return false;
   }
 
@@ -106,8 +107,8 @@ bool JointMotorControl::GetJointRange(const std::string &joint_name,
                                       double &max_angle) const {
   auto it = joint_ranges_.find(joint_name);
   if (it == joint_ranges_.end()) {
-    std::cerr << "Joint range for joint " << joint_name << " not found"
-              << std::endl;
+    LE_LOG_ERROR << "Joint range for joint " << joint_name << " not found"
+                 << std::endl;
     return false;
   }
 
@@ -120,8 +121,8 @@ bool JointMotorControl::GetMotorCalibration(
     const std::string &joint_name, MotorCalibration &calibration) const {
   auto it = motor_calibrations_.find(joint_name);
   if (it == motor_calibrations_.end()) {
-    std::cerr << "Motor calibration for joint " << joint_name << " not found"
-              << std::endl;
+    LE_LOG_ERROR << "Motor calibration for joint " << joint_name << " not found"
+                 << std::endl;
     return false;
   }
 
@@ -134,8 +135,8 @@ bool JointMotorControl::LoadMotorCalibration(
   try {
     std::ifstream file(calibration_file_path);
     if (!file.is_open()) {
-      std::cerr << "Could not open motor calibration file: "
-                << calibration_file_path << std::endl;
+      LE_LOG_ERROR << "Could not open motor calibration file: "
+                   << calibration_file_path << std::endl;
       return false;
     }
 
@@ -166,19 +167,21 @@ bool JointMotorControl::LoadMotorCalibration(
 
       joint_ranges_[joint_name] = joint_range;
 
-      std::cout << "Loaded calibration for " << joint_name << ":" << std::endl;
-      std::cout << "  Motor range: [" << calibration.range_min << ", "
-                << calibration.range_max << "]" << std::endl;
-      std::cout << "  Joint range: [" << joint_range.min_angle << ", "
-                << joint_range.max_angle << "] rad" << std::endl;
-      std::cout << "  Joint range: [" << joint_range.min_angle * 180.0 / M_PI
-                << ", " << joint_range.max_angle * 180.0 / M_PI << "] deg"
-                << std::endl;
+      LE_LOG_INFO << "Loaded calibration for " << joint_name << ":"
+                  << std::endl;
+      LE_LOG_INFO << "  Motor range: [" << calibration.range_min << ", "
+                  << calibration.range_max << "]" << std::endl;
+      LE_LOG_INFO << "  Joint range: [" << joint_range.min_angle << ", "
+                  << joint_range.max_angle << "] rad" << std::endl;
+      LE_LOG_INFO << "  Joint range: [" << joint_range.min_angle * 180.0 / M_PI
+                  << ", " << joint_range.max_angle * 180.0 / M_PI << "] deg"
+                  << std::endl;
     }
 
     return true;
   } catch (const std::exception &e) {
-    std::cerr << "Error loading motor calibration: " << e.what() << std::endl;
+    LE_LOG_ERROR << "Error loading motor calibration: " << e.what()
+                 << std::endl;
     return false;
   }
 }
@@ -212,49 +215,13 @@ bool JointMotorControl::LoadConfiguration(const std::string &config_file_path) {
       }
     }
 
-    std::cout << "Successfully loaded configuration from: " << config_file_path
-              << std::endl;
+    LE_LOG_INFO << "Successfully loaded configuration from: "
+                << config_file_path << std::endl;
     return true;
   } catch (const std::exception &e) {
-    std::cerr << "Error loading configuration: " << e.what() << std::endl;
+    LE_LOG_ERROR << "Error loading configuration: " << e.what() << std::endl;
     return false;
   }
-}
-
-// GripperMotorControl implementation (empty functions for now)
-GripperMotorControl::GripperMotorControl(
-    const std::string &config_file_path,
-    const std::string &motor_calibration_file_path)
-    : JointMotorControl(config_file_path, motor_calibration_file_path) {
-  // Empty implementation
-}
-
-double GripperMotorControl::JointToMotorPosition(const std::string &joint_name,
-                                                 double joint_position) const {
-  // Empty implementation
-  return 0.0;
-}
-
-double GripperMotorControl::MotorToJointPosition(const std::string &joint_name,
-                                                 double motor_position) const {
-  // Empty implementation
-  return 0.0;
-}
-
-std::vector<std::string> GripperMotorControl::GetJointNames() const {
-  // Empty implementation
-  return std::vector<std::string>();
-}
-
-bool GripperMotorControl::IsValidJoint(const std::string &joint_name) const {
-  // Empty implementation
-  return false;
-}
-
-bool GripperMotorControl::LoadConfiguration(
-    const std::string &config_file_path) {
-  // Empty implementation
-  return true;
 }
 
 } // namespace lerobot_vr_controller
