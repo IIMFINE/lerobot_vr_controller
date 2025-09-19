@@ -116,15 +116,7 @@ Visualization Manager:
         All Enabled: true
         base_link:
           Value: true
-        controller_head:
-          Value: true
-        controller_left:
-          Value: true
-        controller_right:
-          Value: true
         gripper_frame_link:
-          Value: true
-        gripper_frame_link_cal:
           Value: true
         gripper_link:
           Value: true
@@ -136,13 +128,7 @@ Visualization Manager:
           Value: true
         upper_arm_link:
           Value: true
-        world_vr:
-          Value: true
-        wrist_left:
-          Value: true
         wrist_link:
-          Value: true
-        wrist_right:
           Value: true
       Marker Scale: 1
       Name: TF
@@ -151,8 +137,6 @@ Visualization Manager:
       Show Names: false
       Tree:
         base_link:
-          gripper_frame_link_cal:
-            {}
           shoulder_link:
             upper_arm_link:
               lower_arm_link:
