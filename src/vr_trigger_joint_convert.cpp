@@ -19,8 +19,8 @@ void VrTriggerJointConvert::AddJointConfig(const TriggerJointConfig &config) {
   joint_configs_[config.joint_name] = config;
 }
 
-double VrTriggerJointConvert::GetJointPosition(const std::string &joint_name,
-                                               double trigger_value) const {
+double VrTriggerJointConvert::ConvertJointPosition(const std::string &joint_name,
+                                                   double trigger_value) const {
   auto it = joint_configs_.find(joint_name);
   if (it == joint_configs_.end()) {
     throw std::runtime_error("Joint '" + joint_name + "' is not configured");

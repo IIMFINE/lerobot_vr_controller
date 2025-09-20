@@ -56,15 +56,20 @@ install(
 )
 
 if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
-  set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
+  # Create log test executable
+  add_executable(log_test 
+    src/log_test.cpp
+  )
+  
+  # Include header files for log_test
+  target_include_directories(log_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+  )
+
+  install(TARGETS log_test
+    DESTINATION lib/${PROJECT_NAME}
+  )
+
 endif()
 
 ament_auto_package()
