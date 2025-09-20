@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -37,10 +38,17 @@ static constexpr const char *kGripperCalSuffix = "_cal";
 static constexpr const char *kVrBaseLinkDummySuffix = "_vr_dummy";
 static constexpr const char *kDefaultGripperJointName = "gripper";
 
-class VrTfReceiver {
+// Topic name constants
+static constexpr const char *kVrControllerJointCmdTopic =
+    "/vr_controller/joint_cmd";
+static constexpr const char *kVrControllerRightJoyTopic =
+    "/vr/controller_right/joy";
+static constexpr const char *kJointStatesTopic = "/joint_states";
+
+class VrRobotController {
 public:
-  explicit VrTfReceiver(std::shared_ptr<rclcpp::Node> node);
-  ~VrTfReceiver();
+  explicit VrRobotController(std::shared_ptr<rclcpp::Node> node);
+  ~VrRobotController();
 
   // Initialize the VR TF receiver with YAML configuration
   bool
@@ -54,8 +62,16 @@ public:
   void Start();
 
   // Get the latest joint state snapshot for a specific gripper
+  JointPositionState GetLatestJointState(const std::string &gripper_link) const;
+
+  // Get the latest joint position state for a specific gripper (returns
+  // JointPositionState)
+  JointPositionState
+  GetLatestJointPositionState(const std::string &gripper_link) const;
+
+  // Convert JointPositionState to sensor_msgs::msg::JointState
   sensor_msgs::msg::JointState
-  GetLatestJointState(const std::string &gripper_link) const;
+  ConvertToRosJointState(const JointPositionState &joint_position_state) const;
 
   // Convert VR trigger value to gripper joint position
   double ConvertTriggerJointPosition(const std::string &gripper_link,
@@ -75,6 +91,9 @@ public:
   // Stop robot control interface
   void StopRobotControl();
 
+  // Move all robots to home pose (all joints to 0)
+  bool MoveToHomePose();
+
 private:
   bool InitIkSolver();
 
@@ -92,7 +111,7 @@ private:
 
   // Similar to Vr2GripperTfPublish but enqueue target EE poses instead of
   // broadcasting TF
-  void Vr2GripperTfEnqueue();
+  void UpdateVrPose();
 
   void JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg, const std::string &topic_name);
 
@@ -112,6 +131,17 @@ private:
   // Callback to update latest joint state
   void UpdateJointState(const sensor_msgs::msg::JointState::SharedPtr msg);
 
+  // Convert sensor_msgs::msg::JointState to JointPositionState for specific
+  // gripper
+  std::optional<JointPositionState> ConvertJointStateToJointPositionState(
+      const sensor_msgs::msg::JointState::SharedPtr msg,
+      const std::string &gripper_link,
+      const std::vector<std::string> &solver_joint_names);
+
+  // Update JointPositionState to latest_joint_state_map_
+  void UpdateLatestJointStateMap(const std::string &gripper_link,
+                                 const JointPositionState &joint_state);
+
   // Publish joint commands for rviz2 visualization
   void PublishJointCmd(const std::string &gripper_link,
                        const std::vector<double> &joint_solution);
@@ -124,6 +154,9 @@ private:
   void GripperCmdEnqueue(const std::string &gripper_link,
                          const CusJointCmd &gripper_cmd);
 
+  // Publish current robot joint states at 100Hz
+  void PublishRobotJointStates();
+
   // Node pointer passed from main
   std::shared_ptr<rclcpp::Node> node_;
 
@@ -133,6 +166,7 @@ private:
   rclcpp::CallbackGroup::SharedPtr enqueue_callback_group_;
   rclcpp::CallbackGroup::SharedPtr joy_callback_group_;
   rclcpp::CallbackGroup::SharedPtr joint_state_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr joint_state_publish_callback_group_;
 
   // TF broadcaster
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
@@ -182,6 +216,9 @@ private:
   // New 100Hz timer for enqueuing VR->gripper targets
   rclcpp::TimerBase::SharedPtr vr_to_gripper_enqueue_timer_;
 
+  // Timer for publishing joint states at 100Hz
+  rclcpp::TimerBase::SharedPtr joint_state_publish_timer_;
+
   // Joystick subscriber
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscriber_;
 
@@ -189,7 +226,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr
       joint_state_subscriber_;
 
-  std::map<std::string, sensor_msgs::msg::JointState> latest_joint_state_map_;
+  std::map<std::string, JointPositionState> latest_joint_state_map_;
 
   // Shared mutex for thread-safe access to latest_joint_state_map_
   mutable std::shared_mutex latest_joint_state_map_mutex_;
@@ -197,6 +234,10 @@ private:
   // Joint command publisher for rviz2 visualization
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr
       joint_state_publisher_;
+
+  // Joint states publisher to kJointStatesTopic
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr
+      robot_joint_state_publisher_;
 
   // IK solvers for each gripper link
   std::map<std::string, std::unique_ptr<SoArm101Kinematics>> ik_solvers_;

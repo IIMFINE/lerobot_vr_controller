@@ -13,9 +13,9 @@ int main(int argc, char **argv) {
   // Create node
   auto node = std::make_shared<rclcpp::Node>("vr_tf_receiver_node");
 
-  // Create VrTfReceiver instance
+  // Create VrRobotController instance
   auto vr_tf_receiver =
-      std::make_unique<lerobot_vr_controller::VrTfReceiver>(node);
+      std::make_unique<lerobot_vr_controller::VrRobotController>(node);
 
   // Initialize YAML configuration (you may want to make this configurable via
   // parameter)
