@@ -30,6 +30,9 @@ VrTfReceiver::VrTfReceiver(std::shared_ptr<rclcpp::Node> node) : node_(node) {
   joint_state_callback_group_ = node_->create_callback_group(
       rclcpp::CallbackGroupType::MutuallyExclusive);
 
+  // Initialize VR trigger to joint converter
+  trigger_converter_ = std::make_unique<vr_controller::VrTriggerJointConvert>();
+
   LE_LOG_INFO << "VrTfReceiver initialized" << std::endl;
 }
 
@@ -95,9 +98,12 @@ void VrTfReceiver::Start() {
   auto qos = rclcpp::QoS(10).best_effort();
   auto joy_sub_options = rclcpp::SubscriptionOptions();
   joy_sub_options.callback_group = joy_callback_group_;
+  std::string joy_topic_name = "/vr/controller_right/joy";
   joy_subscriber_ = node_->create_subscription<sensor_msgs::msg::Joy>(
-      "/vr/controller_right/joy", qos,
-      std::bind(&VrTfReceiver::JoystickCallback, this, std::placeholders::_1),
+      joy_topic_name, qos,
+      [this, joy_topic_name](const sensor_msgs::msg::Joy::SharedPtr msg) {
+        JoystickCallback(msg, joy_topic_name);
+      },
       joy_sub_options);
 
   // Subscribe to /joint_states to keep the latest joint state
@@ -184,6 +190,51 @@ bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
           << std::endl;
     }
 
+    // Configure VR trigger to joint converter
+    double trigger_scale = 0.0068; // Default value
+    // Parse trigger_config section for joint mappings
+    if (config["trigger_config"]) {
+      auto trigger_config = config["trigger_config"];
+
+      // Update trigger scale if specified in trigger_config
+      if (trigger_config["trigger_to_gripper_scale"]) {
+        trigger_scale = trigger_config["trigger_to_gripper_scale"].as<double>();
+        LE_LOG_INFO << "Updated trigger_to_gripper_scale from trigger_config: "
+                    << trigger_scale << std::endl;
+      }
+
+      // Parse joint_mappings
+      if (trigger_config["joint_mappings"]) {
+        auto joint_mappings = trigger_config["joint_mappings"];
+        for (auto it = joint_mappings.begin(); it != joint_mappings.end();
+             ++it) {
+          std::string joint_name = it->first.as<std::string>();
+          std::string vr_topic = it->second.as<std::string>();
+
+          joint_to_vr_topic_map_[joint_name] = vr_topic;
+
+          LE_LOG_INFO << "Loaded joint mapping: " << joint_name << " -> "
+                      << vr_topic << std::endl;
+        }
+      }
+    }
+
+    // Also configure trigger converter for any joints specified in
+    // joint_mappings
+    for (const auto &[joint_name, vr_topic] : joint_to_vr_topic_map_) {
+      vr_controller::TriggerJointConfig joint_config(
+          joint_name,   // joint_name
+          0.0,          // default_joint_position
+          0.0,          // trigger_default_position
+          trigger_scale // trigger_to_gripper_scale
+      );
+
+      trigger_converter_->AddJointConfig(joint_config);
+      LE_LOG_INFO << "Configured trigger converter for mapped joint: "
+                  << joint_name << " with scale: " << trigger_scale
+                  << std::endl;
+    }
+
     // Iterate through all key-value pairs in vr_to_arm_tf
     for (auto it = tf_config.begin(); it != tf_config.end(); ++it) {
       std::string gripper_link = it->first.as<std::string>();
@@ -197,9 +248,6 @@ bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
 
     return true;
 
-  } catch (const YAML::Exception &e) {
-    LE_LOG_ERROR << "YAML parsing error: " << e.what() << std::endl;
-    return false;
   } catch (const std::exception &e) {
     LE_LOG_ERROR << "Error loading YAML config: " << e.what() << std::endl;
     return false;
@@ -395,18 +443,40 @@ void VrTfReceiver::Vr2GripperTfEnqueue() {
       }
       target_ee_pose_queue_cond_.notify_one();
     } catch (const std::exception &e) {
-      // RCLCPP_WARN(node_->get_logger(), "Failed for %s <- %s: %s",
-      //             gripper_link.c_str(), vr_frame.c_str(), e.what());
     }
   }
 }
 
-void VrTfReceiver::JoystickCallback(
-    const sensor_msgs::msg::Joy::SharedPtr msg) {
-  // Check if buttons array has at least 6 elements (index 5)
-  if (msg->buttons.size() > 5 && msg->buttons[5] != 0) {
+void VrTfReceiver::JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg,
+                                    const std::string &topic_name) {
+  // VR controller button indices
+  constexpr const int kTriggerButton = 0;
+  constexpr const int kBButton = 5;
+
+  // Check if buttons array has at least 6 elements (B button index)
+  if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
     should_calibrate_ = true;
-    LE_LOG_INFO << "Calibration triggered by joystick button 5" << std::endl;
+    LE_LOG_INFO << "Calibration triggered by joystick B button" << std::endl;
+  }
+
+  // Handle trigger input for gripper control based on joint_mappings
+  // configuration
+  if (trigger_converter_) {
+    // Find which joint(s) are mapped to this VR topic
+    for (const auto &[joint_name, vr_topic] : joint_to_vr_topic_map_) {
+      if (vr_topic == topic_name) {
+        // This joint is controlled by the current VR topic
+        double trigger_value = 0.0;
+
+        // Extract trigger value from the joystick message
+        if (msg->buttons.size() > kTriggerButton) {
+          trigger_value = static_cast<double>(msg->buttons[kTriggerButton]);
+        }
+
+        // Convert trigger value to gripper joint position
+        ConvertTriggerJointPosition(joint_name, trigger_value);
+      }
+    }
   }
 }
 
@@ -586,9 +656,7 @@ void VrTfReceiver::ControlJointWithEe(
     if (pose_queue.empty())
       continue;
 
-    // 只处理最新的几个姿态以减少计算负载
-    size_t poses_to_process = std::min(pose_queue.size(), size_t(3));
-    size_t start_idx = pose_queue.size() - poses_to_process;
+    size_t start_idx = 0;
 
     // Get current joint state as seed for IK
     sensor_msgs::msg::JointState current_joint_state =
@@ -597,16 +665,8 @@ void VrTfReceiver::ControlJointWithEe(
     // Find the IK solver for this gripper link to use AlignJointStateToIk
     auto ik_it = ik_solvers_.find(gripper_link);
     if (ik_it == ik_solvers_.end()) {
-      // 减少频繁的警告日志输出 - 每5秒最多输出一次
-      static auto last_warn_time = std::chrono::steady_clock::now();
-      auto now = std::chrono::steady_clock::now();
-      if (std::chrono::duration_cast<std::chrono::milliseconds>(now -
-                                                                last_warn_time)
-              .count() > 5000) {
-        LE_LOG_ERROR << "IK solver not found for gripper link: " << gripper_link
-                     << std::endl;
-        last_warn_time = now;
-      }
+      LE_LOG_ERROR_T(5s) << "IK solver not found for gripper link: "
+                         << gripper_link << std::endl;
       continue;
     }
 
@@ -630,15 +690,20 @@ void VrTfReceiver::ControlJointWithEe(
       std::vector<double> joint_solution;
 
       // Call IK solver
-      if (IkGripperTf(gripper_link, target_transform, joint_solution,
-                      seed_joints)) {
-        // Update seed for next iteration
-        seed_joints = joint_solution;
+      if (!IkGripperTf(gripper_link, target_transform, joint_solution,
+                       seed_joints)) {
+        LE_LOG_ERROR_T(5s) << "IK solving failed for gripper link: "
+                           << gripper_link << " at queue index: " << i
+                           << std::endl;
+        continue;
+      }
 
-        // Only publish the final solution to reduce message load
-        if (i == pose_queue.size() - 1) {
-          PublishJointCmd(gripper_link, joint_solution);
-        }
+      // Update seed for next iteration
+      seed_joints = joint_solution;
+
+      // Only publish the final solution to reduce message load
+      if (i == pose_queue.size() - 1) {
+        PublishJointCmd(gripper_link, joint_solution);
       }
     }
   }
@@ -714,6 +779,24 @@ VrTfReceiver::GetLatestJointState(const std::string &gripper_link) const {
   return empty_joint_state;
 }
 
+double
+VrTfReceiver::ConvertTriggerJointPosition(const std::string &gripper_joint_name,
+                                          double trigger_value) const {
+  if (!trigger_converter_) {
+    LE_LOG_ERROR << "Trigger converter not initialized" << std::endl;
+    return 0.0;
+  }
+
+  if (!trigger_converter_->HasJoint(gripper_joint_name)) {
+    LE_LOG_ERROR << "Joint not configured in trigger converter: "
+                 << gripper_joint_name << std::endl;
+    return 0.0;
+  }
+
+  return trigger_converter_->ConvertJointPosition(gripper_joint_name,
+                                                  trigger_value);
+}
+
 void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
                                    const std::vector<double> &joint_solution) {
   if (!joint_state_publisher_) {
@@ -762,13 +845,30 @@ void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
 
   // Publish the joint command
   joint_state_publisher_->publish(joint_state_msg);
+}
 
-  // 减少DEBUG级别的日志输出频率
-  static int debug_counter = 0;
-  if (++debug_counter % 100 == 0) { // 每100次输出一次
-    LE_LOG_INFO << "Published joint command with " << joint_solution.size()
-                << " joints for gripper: " << gripper_link << std::endl;
-  }
+void VrTfReceiver::JointCmdEnqueue(
+    const std::string &gripper_link,
+    const sensor_msgs::msg::JointState &joint_cmd) {
+  std::unique_lock<std::shared_mutex> lock(joint_cmd_queue_mutex_);
+
+  // Add the joint command to the queue for the specified gripper link
+  joint_cmd_queue_[gripper_link].push_back(joint_cmd);
+
+  // Notify waiting threads that a new command is available
+  joint_cmd_queue_cond_.notify_one();
+}
+
+void VrTfReceiver::GripperCmdEnqueue(
+    const std::string &gripper_link,
+    const sensor_msgs::msg::JointState &gripper_cmd) {
+  std::unique_lock<std::shared_mutex> lock(gripper_cmd_queue_mutex_);
+
+  // Add the gripper command to the queue for the specified gripper link
+  gripper_cmd_queue_[gripper_link].push_back(gripper_cmd);
+
+  // Notify waiting threads that a new command is available
+  gripper_cmd_queue_cond_.notify_one();
 }
 
 } // namespace lerobot_vr_controller

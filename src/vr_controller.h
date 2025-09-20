@@ -22,6 +22,7 @@
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
+#include "vr_trigger_joint_convert.h"
 #include "yaml-cpp/yaml.h"
 
 namespace lerobot_vr_controller {
@@ -29,6 +30,7 @@ namespace lerobot_vr_controller {
 // Constants
 static constexpr const char *kGripperCalSuffix = "_cal";
 static constexpr const char *kVrBaseLinkDummySuffix = "_vr_dummy";
+static constexpr const char *kDefaultGripperJointName = "gripper";
 
 class VrTfReceiver {
 public:
@@ -45,6 +47,10 @@ public:
   // Get the latest joint state snapshot for a specific gripper
   sensor_msgs::msg::JointState
   GetLatestJointState(const std::string &gripper_link) const;
+
+  // Convert VR trigger value to gripper joint position
+  double ConvertTriggerJointPosition(const std::string &gripper_link,
+                                     double trigger_value) const;
 
 private:
   bool InitIkSolver();
@@ -65,7 +71,7 @@ private:
   // broadcasting TF
   void Vr2GripperTfEnqueue();
 
-  void JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg);
+  void JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg, const std::string &topic_name);
 
   // Load configuration from YAML
   bool LoadYamlConfig(const std::string &yaml_file_path);
@@ -86,6 +92,14 @@ private:
   // Publish joint commands for rviz2 visualization
   void PublishJointCmd(const std::string &gripper_link,
                        const std::vector<double> &joint_solution);
+
+  // Enqueue joint command to joint_cmd_queue_
+  void JointCmdEnqueue(const std::string &gripper_link,
+                       const sensor_msgs::msg::JointState &joint_cmd);
+
+  // Enqueue gripper command to gripper_cmd_queue_
+  void GripperCmdEnqueue(const std::string &gripper_link,
+                         const sensor_msgs::msg::JointState &gripper_cmd);
 
   // Node pointer passed from main
   std::shared_ptr<rclcpp::Node> node_;
@@ -164,6 +178,12 @@ private:
   // IK solvers for each gripper link
   std::map<std::string, std::unique_ptr<SoArm101Kinematics>> ik_solvers_;
 
+  // VR trigger to joint converter
+  std::unique_ptr<vr_controller::VrTriggerJointConvert> trigger_converter_;
+
+  // Mapping from joint name to VR topic for trigger control
+  std::map<std::string, std::string> joint_to_vr_topic_map_;
+
   // IK tolerance configurations loaded from YAML
   double position_tolerance_;
   double orientation_tolerance_;
@@ -171,6 +191,15 @@ private:
   // Dedicated worker thread to process EE targets into joint commands
   std::atomic<bool> ee_to_joint_worker_running_{false};
   std::thread ee_to_joint_worker_;
+
+  std::shared_mutex joint_cmd_queue_mutex_;
+  std::condition_variable joint_cmd_queue_cond_;
+  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
+      joint_cmd_queue_;
+  std::condition_variable gripper_cmd_queue_cond_;
+  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
+      gripper_cmd_queue_;
+  std::shared_mutex gripper_cmd_queue_mutex_;
 };
 
 } // namespace lerobot_vr_controller

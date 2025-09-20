@@ -50,13 +50,13 @@ public:
   void AddJointConfig(const TriggerJointConfig &config);
 
   /**
-   * @brief Get joint position for a given trigger value
+   * @brief Convert trigger value to joint position for a given joint
    * @param joint_name Name of the joint
    * @param trigger_value Current trigger value (typically 0.0 to 1.0)
    * @return Calculated joint position
    */
-  double GetJointPosition(const std::string &joint_name,
-                          double trigger_value) const;
+  double ConvertJointPosition(const std::string &joint_name,
+                              double trigger_value) const;
 
   /**
    * @brief Check if a joint is configured
