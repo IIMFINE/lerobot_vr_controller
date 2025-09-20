@@ -178,8 +178,8 @@ bool SoArm101Kinematics::SolveIK(const tf2::Transform &target_transform,
       return true;
     }
   }
-  LE_LOG_ERROR << "Failed to solve IK for the given target transform"
-               << std::endl;
+  LE_LOG_ERROR_T(1s) << "Failed to solve IK for the given target transform"
+                     << std::endl;
   return false;
 }
 

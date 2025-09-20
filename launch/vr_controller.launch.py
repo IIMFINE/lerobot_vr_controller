@@ -39,6 +39,34 @@ def generate_launch_description():
         description="Log level for the node (debug, info, warn, error, fatal)",
     )
 
+    joint_motor_config_file_arg = DeclareLaunchArgument(
+        "joint_motor_config_file",
+        default_value=PathJoinSubstitution(
+            [
+                FindPackageShare("lerobot_vr_controller"),
+                "config",
+                "motor",
+                "so101_follower",
+                "joint_motor_config.yaml",
+            ]
+        ),
+        description="Path to the joint motor configuration file",
+    )
+
+    motor_calibration_file_arg = DeclareLaunchArgument(
+        "motor_calibration_file",
+        default_value=PathJoinSubstitution(
+            [
+                FindPackageShare("lerobot_vr_controller"),
+                "config",
+                "motor",
+                "so101_follower",
+                "motor_calibration.yaml",
+            ]
+        ),
+        description="Path to the motor calibration file",
+    )
+
     # VR TF Receiver Node
     vr_tf_receiver_node = Node(
         package="lerobot_vr_controller",
@@ -49,6 +77,8 @@ def generate_launch_description():
             {
                 "config_file": LaunchConfiguration("config_file"),
                 "urdf_file": LaunchConfiguration("urdf_file"),
+                "joint_motor_config_file": LaunchConfiguration("joint_motor_config_file"),
+                "motor_calibration_file": LaunchConfiguration("motor_calibration_file"),
             }
         ],
         arguments=["--ros-args", "--log-level", LaunchConfiguration("log_level")],
@@ -61,6 +91,8 @@ def generate_launch_description():
             config_file_arg,
             urdf_file_arg,
             log_level_arg,
+            joint_motor_config_file_arg,
+            motor_calibration_file_arg,
             vr_tf_receiver_node,
         ]
     )

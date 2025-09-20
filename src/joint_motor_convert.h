@@ -1,5 +1,5 @@
-#ifndef JOINT_MOTOR_CONTROL_H_
-#define JOINT_MOTOR_CONTROL_H_
+#ifndef JOINT_MOTOR_CONVERT_H_
+#define JOINT_MOTOR_CONVERT_H_
 
 #include <map>
 #include <memory>
@@ -30,12 +30,12 @@ struct JointRange {
   double max_angle; // radians
 };
 
-class JointMotorControl {
+class JointMotorConvert {
 public:
-  explicit JointMotorControl(
+  explicit JointMotorConvert(
       const std::string &config_file_path,
       const std::string &motor_calibration_file_path = "");
-  virtual ~JointMotorControl() = default;
+  virtual ~JointMotorConvert() = default;
 
   // Convert joint position (radians) to motor position
   virtual double JointToMotorPosition(const std::string &joint_name,
@@ -78,4 +78,4 @@ protected:
 
 } // namespace lerobot_vr_controller
 
-#endif // JOINT_MOTOR_CONTROL_H_
+#endif // JOINT_MOTOR_CONVERT_H_

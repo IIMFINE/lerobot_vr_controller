@@ -2,17 +2,23 @@
 #define ROBOT_CONTROL_INTERFACE_H_
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <map>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
+#include "rclcpp/rclcpp.hpp"
+
+#include "interface_type.h"
 #include "log.h"
-#include "sensor_msgs/msg/joint_state.hpp"
+#include "robot_communicate_interface.h"
 
 namespace lerobot_vr_controller {
 
@@ -26,9 +32,18 @@ namespace lerobot_vr_controller {
 class RobotControlInterface {
 public:
   /**
-   * @brief Default constructor for RobotControlInterface.
+   * @brief Constructor for RobotControlInterface.
+   * @param node Shared pointer to ROS2 node
+   * @param joint_motor_config_file_path Path to joint motor configuration file
+   * @param motor_calibration_file_path Path to motor calibration file
+   * (optional)
+   * @param motor_cmd_topic Topic name for publishing motor positions
    */
-  RobotControlInterface() = default;
+  explicit RobotControlInterface(
+      std::shared_ptr<rclcpp::Node> node,
+      const std::string &joint_motor_config_file_path,
+      const std::string &motor_calibration_file_path,
+      const std::string &motor_cmd_topic = "/robot_control/motor_cmd");
 
   /**
    * @brief Destructor that properly shuts down all worker threads.
@@ -61,59 +76,48 @@ public:
 
   /**
    * @brief Enqueue a joint command for execution.
-   * @param robot_name Name of the robot (e.g., "left_arm", "right_arm").
    * @param joint_cmd Joint state command to enqueue.
    * @return true if command was enqueued successfully.
    */
-  bool EnqueueJointCommand(const std::string &robot_name,
-                           const sensor_msgs::msg::JointState &joint_cmd);
+  bool EnqueueJointCommand(const CusJointCmd &joint_cmd);
 
   /**
    * @brief Enqueue a gripper command for execution.
-   * @param robot_name Name of the robot gripper.
    * @param gripper_cmd Gripper state command to enqueue.
    * @return true if command was enqueued successfully.
    */
-  bool EnqueueGripperCommand(const std::string &robot_name,
-                             const sensor_msgs::msg::JointState &gripper_cmd);
+  bool EnqueueGripperCommand(const CusJointCmd &gripper_cmd);
 
   /**
-   * @brief Dequeue the next joint command for a specific robot.
-   * @param robot_name Name of the robot.
+   * @brief Dequeue the next joint command.
    * @param joint_cmd Output parameter to store the dequeued command.
    * @return true if a command was dequeued, false if queue is empty.
    */
-  bool DequeueJointCommand(const std::string &robot_name,
-                           sensor_msgs::msg::JointState &joint_cmd);
+  bool DequeueJointCommand(CusJointCmd &joint_cmd);
 
   /**
-   * @brief Dequeue the next gripper command for a specific robot.
-   * @param robot_name Name of the robot.
+   * @brief Dequeue the next gripper command.
    * @param gripper_cmd Output parameter to store the dequeued command.
    * @return true if a command was dequeued, false if queue is empty.
    */
-  bool DequeueGripperCommand(const std::string &robot_name,
-                             sensor_msgs::msg::JointState &gripper_cmd);
+  bool DequeueGripperCommand(CusJointCmd &gripper_cmd);
 
   /**
-   * @brief Get the number of pending joint commands for a specific robot.
-   * @param robot_name Name of the robot.
+   * @brief Get the number of pending joint commands.
    * @return Number of pending commands in the queue.
    */
-  size_t GetJointCommandQueueSize(const std::string &robot_name) const;
+  size_t GetJointCommandQueueSize() const;
 
   /**
-   * @brief Get the number of pending gripper commands for a specific robot.
-   * @param robot_name Name of the robot.
+   * @brief Get the number of pending gripper commands.
    * @return Number of pending commands in the queue.
    */
-  size_t GetGripperCommandQueueSize(const std::string &robot_name) const;
+  size_t GetGripperCommandQueueSize() const;
 
   /**
-   * @brief Clear all pending commands for a specific robot.
-   * @param robot_name Name of the robot.
+   * @brief Clear all pending commands.
    */
-  void ClearAllCommands(const std::string &robot_name);
+  void ClearAllCommands();
 
   /**
    * @brief Check if the control interface is currently running.
@@ -121,26 +125,84 @@ public:
    */
   bool IsRunning() const { return is_running_.load(); }
 
+  /**
+   * @brief Get current joint position state from robot.
+   *
+   * This method retrieves the current motor positions from the robot
+   * communication interface and converts them to joint positions using the
+   * joint-motor converter.
+   *
+   * @return JointPositionState containing current joint positions and
+   * timestamp. If no motor state is available, returns empty joint positions.
+   */
+  JointPositionState GetJointPositionState() const;
+
+  /**
+   * @brief Attempt to fuse joint and gripper commands if their timestamps are
+   * close.
+   *
+   * This method checks the front elements of both joint and gripper command
+   * queues. If both queues have commands and their timestamps
+   * differ by less than 1ms, they are combined into a single CusJointCmd
+   * structure. If one queue is empty, it attempts to fuse with the last
+   * recorded command.
+   *
+   * @return std::optional<CusJointCmd> containing the fused command if fusion
+   *         occurs, std::nullopt otherwise.
+   */
+  std::optional<CusJointCmd> FuseCommand();
+
+  /**
+   * @brief Control robot with 100Hz frequency using timer.
+   * This method runs in a separate thread and continuously processes
+   * fused commands at 100Hz rate.
+   */
+  void ControlRobot();
+
+  /**
+   * @brief Start the control robot timer thread.
+   */
+  void StartControlThread();
+
+  /**
+   * @brief Stop the control robot timer thread.
+   */
+  void StopControlThread();
+
 private:
-  // Thread-safe command queues
-  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
-      joint_cmd_queue_;
-  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
-      gripper_cmd_queue_;
+  // RobotCommunicateInterface for robot communication
+  std::unique_ptr<RobotCommunicateInterface> robot_communicate_interface_;
 
   // Mutexes and condition variables for thread synchronization
   mutable std::shared_mutex joint_cmd_queue_mutex_;
   std::condition_variable_any joint_cmd_queue_cond_;
+  std::deque<CusJointCmd> joint_cmd_queue_;
 
   mutable std::shared_mutex gripper_cmd_queue_mutex_;
   std::condition_variable_any gripper_cmd_queue_cond_;
+  std::deque<CusJointCmd> gripper_cmd_queue_;
 
   // Control flags
   std::atomic<bool> is_running_{false};
   std::atomic<bool> should_stop_{false};
 
+  // Control robot timer thread
+  std::thread control_thread_;
+  std::atomic<bool> control_thread_running_{false};
+
+  // Last recorded commands for fusion when queues are empty
+  mutable std::shared_mutex last_cmd_mutex_;
+  std::deque<CusJointCmd> last_joint_cmd_;
+  std::deque<CusJointCmd> last_gripper_cmd_;
+
   // Maximum queue sizes to prevent memory issues
-  static constexpr size_t kMaxQueueSize = 1000;
+  static constexpr size_t kMaxQueueSize = 100;
+
+  // Time difference threshold for command fusion (1ms in nanoseconds)
+  static constexpr uint64_t kFusionThresholdNs = 5'000'000;
+
+  // Control frequency: 100Hz = 10ms period
+  static constexpr std::chrono::milliseconds kControlPeriod{10};
 };
 
 } // namespace lerobot_vr_controller

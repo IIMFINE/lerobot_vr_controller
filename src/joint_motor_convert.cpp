@@ -13,7 +13,7 @@
 
 namespace lerobot_vr_controller {
 
-JointMotorControl::JointMotorControl(
+JointMotorConvert::JointMotorConvert(
     const std::string &config_file_path,
     const std::string &motor_calibration_file_path) {
   if (!LoadConfiguration(config_file_path)) {
@@ -27,7 +27,7 @@ JointMotorControl::JointMotorControl(
   }
 }
 
-double JointMotorControl::JointToMotorPosition(const std::string &joint_name,
+double JointMotorConvert::JointToMotorPosition(const std::string &joint_name,
                                                double joint_position) const {
   auto mapping_it = joint_motor_mappings_.find(joint_name);
   auto scale_it = joint_motor_scales_.find(joint_name);
@@ -50,7 +50,7 @@ double JointMotorControl::JointToMotorPosition(const std::string &joint_name,
   return motor_position;
 }
 
-double JointMotorControl::MotorToJointPosition(const std::string &joint_name,
+double JointMotorConvert::MotorToJointPosition(const std::string &joint_name,
                                                double motor_position) const {
   auto mapping_it = joint_motor_mappings_.find(joint_name);
   auto scale_it = joint_motor_scales_.find(joint_name);
@@ -73,7 +73,7 @@ double JointMotorControl::MotorToJointPosition(const std::string &joint_name,
   return joint_position;
 }
 
-std::vector<std::string> JointMotorControl::GetJointNames() const {
+std::vector<std::string> JointMotorConvert::GetJointNames() const {
   std::vector<std::string> joint_names;
   joint_names.reserve(joint_motor_mappings_.size());
 
@@ -84,11 +84,11 @@ std::vector<std::string> JointMotorControl::GetJointNames() const {
   return joint_names;
 }
 
-bool JointMotorControl::IsValidJoint(const std::string &joint_name) const {
+bool JointMotorConvert::IsValidJoint(const std::string &joint_name) const {
   return joint_motor_mappings_.find(joint_name) != joint_motor_mappings_.end();
 }
 
-bool JointMotorControl::GetMotorRange(const std::string &joint_name,
+bool JointMotorConvert::GetMotorRange(const std::string &joint_name,
                                       int &range_min, int &range_max) const {
   auto it = motor_calibrations_.find(joint_name);
   if (it == motor_calibrations_.end()) {
@@ -102,7 +102,7 @@ bool JointMotorControl::GetMotorRange(const std::string &joint_name,
   return true;
 }
 
-bool JointMotorControl::GetJointRange(const std::string &joint_name,
+bool JointMotorConvert::GetJointRange(const std::string &joint_name,
                                       double &min_angle,
                                       double &max_angle) const {
   auto it = joint_ranges_.find(joint_name);
@@ -117,7 +117,7 @@ bool JointMotorControl::GetJointRange(const std::string &joint_name,
   return true;
 }
 
-bool JointMotorControl::GetMotorCalibration(
+bool JointMotorConvert::GetMotorCalibration(
     const std::string &joint_name, MotorCalibration &calibration) const {
   auto it = motor_calibrations_.find(joint_name);
   if (it == motor_calibrations_.end()) {
@@ -130,7 +130,7 @@ bool JointMotorControl::GetMotorCalibration(
   return true;
 }
 
-bool JointMotorControl::LoadMotorCalibration(
+bool JointMotorConvert::LoadMotorCalibration(
     const std::string &calibration_file_path) {
   try {
     std::ifstream file(calibration_file_path);
@@ -186,7 +186,7 @@ bool JointMotorControl::LoadMotorCalibration(
   }
 }
 
-bool JointMotorControl::LoadConfiguration(const std::string &config_file_path) {
+bool JointMotorConvert::LoadConfiguration(const std::string &config_file_path) {
   try {
     YAML::Node config = YAML::LoadFile(config_file_path);
 

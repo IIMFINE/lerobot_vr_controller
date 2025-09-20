@@ -17,6 +17,7 @@
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
   <depend>yaml-cpp</depend>
+  <depend>nlohmann-json3-dev</depend>
   <depend>urdf</depend>
   <depend>robot_state_publisher</depend>
   <depend>joint_state_publisher</depend>
