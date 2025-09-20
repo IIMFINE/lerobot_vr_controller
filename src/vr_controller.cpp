@@ -10,7 +10,8 @@
 
 namespace lerobot_vr_controller {
 
-VrTfReceiver::VrTfReceiver(std::shared_ptr<rclcpp::Node> node) : node_(node) {
+VrRobotController::VrRobotController(std::shared_ptr<rclcpp::Node> node)
+    : node_(node) {
   // Initialize TF broadcaster
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
 
@@ -29,14 +30,16 @@ VrTfReceiver::VrTfReceiver(std::shared_ptr<rclcpp::Node> node) : node_(node) {
       rclcpp::CallbackGroupType::MutuallyExclusive);
   joint_state_callback_group_ = node_->create_callback_group(
       rclcpp::CallbackGroupType::MutuallyExclusive);
+  joint_state_publish_callback_group_ = node_->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive);
 
   // Initialize VR trigger to joint converter
   trigger_converter_ = std::make_unique<vr_controller::VrTriggerJointConvert>();
 
-  LE_LOG_INFO << "VrTfReceiver initialized" << std::endl;
+  LE_LOG_INFO << "VrRobotController initialized" << std::endl;
 }
 
-VrTfReceiver::~VrTfReceiver() {
+VrRobotController::~VrRobotController() {
   ee_to_joint_worker_running_ = false;
   target_ee_pose_queue_cond_.notify_all();
   if (ee_to_joint_worker_.joinable()) {
@@ -47,13 +50,13 @@ VrTfReceiver::~VrTfReceiver() {
   StopRobotControl();
 }
 
-bool VrTfReceiver::Initialize(const std::string &yaml_file_path,
-                              const std::string &urdf_file_path,
-                              const std::string &joint_motor_config_file_path,
-                              const std::string &motor_calibration_file_path,
-                              const std::string &motor_cmd_topic) {
+bool VrRobotController::Initialize(
+    const std::string &yaml_file_path, const std::string &urdf_file_path,
+    const std::string &joint_motor_config_file_path,
+    const std::string &motor_calibration_file_path,
+    const std::string &motor_cmd_topic) {
   // Perform any additional initialization steps here
-  LE_LOG_INFO << "VrTfReceiver::Initialize() called" << std::endl;
+  LE_LOG_INFO << "VrRobotController::Initialize() called" << std::endl;
 
   // Initialize YAML configuration
   yaml_config_path_ = yaml_file_path;
@@ -89,35 +92,46 @@ bool VrTfReceiver::Initialize(const std::string &yaml_file_path,
   return true;
 }
 
-void VrTfReceiver::Start() {
+void VrRobotController::Start() {
   // Create joint command publisher for rviz2 visualization
   joint_state_publisher_ =
       node_->create_publisher<sensor_msgs::msg::JointState>(
-          "/vr_controller/joint_cmd", rclcpp::QoS(10));
+          kVrControllerJointCmdTopic, rclcpp::QoS(10));
+
+  // Create robot joint states publisher to kJointStatesTopic at 100Hz
+  robot_joint_state_publisher_ =
+      node_->create_publisher<sensor_msgs::msg::JointState>(kJointStatesTopic,
+                                                            rclcpp::QoS(10));
 
   // Create timer to execute CalibrateVr2GripperTf at 10Hz (100ms interval)
   calibration_timer_ = node_->create_wall_timer(
       std::chrono::milliseconds(10),
-      std::bind(&VrTfReceiver::CalibrateVr2GripperTf, this),
+      std::bind(&VrRobotController::CalibrateVr2GripperTf, this),
       calibration_callback_group_);
 
   // Initialize VR to gripper TF publishing timer at 100Hz
   vr_to_gripper_publish_timer_ = node_->create_wall_timer(
       std::chrono::milliseconds(10),
-      std::bind(&VrTfReceiver::Vr2GripperTfPublish, this),
+      std::bind(&VrRobotController::Vr2GripperTfPublish, this),
       publish_callback_group_);
 
   // Add VR to gripper TF enqueue timer at 50Hz (reduced from 200Hz)
   vr_to_gripper_enqueue_timer_ = node_->create_wall_timer(
       std::chrono::milliseconds(20),
-      std::bind(&VrTfReceiver::Vr2GripperTfEnqueue, this),
+      std::bind(&VrRobotController::UpdateVrPose, this),
       enqueue_callback_group_);
+
+  // Create joint state publish timer at 100Hz (10ms interval)
+  joint_state_publish_timer_ = node_->create_wall_timer(
+      std::chrono::milliseconds(10),
+      std::bind(&VrRobotController::PublishRobotJointStates, this),
+      joint_state_publish_callback_group_);
 
   // Create joystick subscriber
   auto qos = rclcpp::QoS(10).best_effort();
   auto joy_sub_options = rclcpp::SubscriptionOptions();
   joy_sub_options.callback_group = joy_callback_group_;
-  std::string joy_topic_name = "/vr/controller_right/joy";
+  std::string joy_topic_name = kVrControllerRightJoyTopic;
   joy_subscriber_ = node_->create_subscription<sensor_msgs::msg::Joy>(
       joy_topic_name, qos,
       [this, joy_topic_name](const sensor_msgs::msg::Joy::SharedPtr msg) {
@@ -130,7 +144,7 @@ void VrTfReceiver::Start() {
   joint_state_sub_options.callback_group = joint_state_callback_group_;
   joint_state_subscriber_ =
       node_->create_subscription<sensor_msgs::msg::JointState>(
-          "/joint_states", rclcpp::QoS(50),
+          kJointStatesTopic, rclcpp::QoS(50),
           [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
             UpdateJointState(msg);
           },
@@ -138,11 +152,12 @@ void VrTfReceiver::Start() {
 
   if (!ee_to_joint_worker_running_) {
     ee_to_joint_worker_running_ = true;
-    ee_to_joint_worker_ = std::thread(&VrTfReceiver::EeToJointWorkerLoop, this);
+    ee_to_joint_worker_ =
+        std::thread(&VrRobotController::EeToJointWorkerLoop, this);
   }
 }
 
-bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
+bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
   try {
     YAML::Node config = YAML::LoadFile(yaml_file_path);
 
@@ -273,7 +288,7 @@ bool VrTfReceiver::LoadYamlConfig(const std::string &yaml_file_path) {
   }
 }
 
-void VrTfReceiver::CalibrateVr2GripperTf() {
+void VrRobotController::CalibrateVr2GripperTf() {
   if (!tf_buffer_ || !tf_listener_) {
     LE_LOG_ERROR << "TF buffer or listener not initialized" << std::endl;
     return;
@@ -356,8 +371,8 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
   }
 }
 
-tf2::Transform VrTfReceiver::Vr2GripperTf(const std::string &gripper_link,
-                                          const std::string &vr_frame) {
+tf2::Transform VrRobotController::Vr2GripperTf(const std::string &gripper_link,
+                                               const std::string &vr_frame) {
   // Get current VR transform
   geometry_msgs::msg::TransformStamped vr_transform;
   vr_transform = tf_buffer_->lookupTransform(vr_world_frame_, vr_frame,
@@ -394,7 +409,7 @@ tf2::Transform VrTfReceiver::Vr2GripperTf(const std::string &gripper_link,
   return tf_vr_to_gripper_cal;
 }
 
-void VrTfReceiver::Vr2GripperTfPublish() {
+void VrRobotController::Vr2GripperTfPublish() {
   if (!calibrated_flag_) {
     return;
   }
@@ -423,7 +438,7 @@ void VrTfReceiver::Vr2GripperTfPublish() {
   }
 }
 
-void VrTfReceiver::Vr2GripperTfEnqueue() {
+void VrRobotController::UpdateVrPose() {
   // Iterate all mapped gripper links and VR frames
   for (const auto &pair : gripper_link_to_vr_map_) {
     const std::string &gripper_link = pair.first;
@@ -466,8 +481,8 @@ void VrTfReceiver::Vr2GripperTfEnqueue() {
   }
 }
 
-void VrTfReceiver::JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg,
-                                    const std::string &topic_name) {
+void VrRobotController::JoystickCallback(
+    const sensor_msgs::msg::Joy::SharedPtr msg, const std::string &topic_name) {
   // VR controller button indices
   constexpr const int kTriggerButton = 0;
   constexpr const int kSideTriggerButton = 1;
@@ -477,6 +492,9 @@ void VrTfReceiver::JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg,
 
   // Check if buttons array has at least 6 elements (B button index)
   if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
+    MoveToHomePose();
+    LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
+                      << std::endl;
     should_calibrate_ = true;
     LE_LOG_INFO_T(1s) << "Calibration triggered by joystick B button"
                       << std::endl;
@@ -528,7 +546,7 @@ void VrTfReceiver::JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg,
   }
 }
 
-bool VrTfReceiver::InitIkSolver() {
+bool VrRobotController::InitIkSolver() {
   // Read URDF file content
   std::ifstream urdf_file(urdf_file_path_);
   if (!urdf_file.is_open()) {
@@ -620,10 +638,10 @@ bool VrTfReceiver::InitIkSolver() {
   return true;
 }
 
-bool VrTfReceiver::IkGripperTf(const std::string &gripper_link,
-                               const tf2::Transform &target_transform,
-                               std::vector<double> &joint_solution,
-                               const std::vector<double> &seed_joints) {
+bool VrRobotController::IkGripperTf(const std::string &gripper_link,
+                                    const tf2::Transform &target_transform,
+                                    std::vector<double> &joint_solution,
+                                    const std::vector<double> &seed_joints) {
   // Find the IK solver for this gripper link
   auto it = ik_solvers_.find(gripper_link);
   if (it == ik_solvers_.end()) {
@@ -661,7 +679,7 @@ bool VrTfReceiver::IkGripperTf(const std::string &gripper_link,
   }
 }
 
-void VrTfReceiver::EeToJointWorkerLoop() {
+void VrRobotController::EeToJointWorkerLoop() {
   while (ee_to_joint_worker_running_) {
     // Wait until there's work or shutdown
     {
@@ -695,7 +713,7 @@ void VrTfReceiver::EeToJointWorkerLoop() {
   }
 }
 
-void VrTfReceiver::CalculateIk(
+void VrRobotController::CalculateIk(
     const std::map<std::string,
                    std::deque<geometry_msgs::msg::TransformStamped>>
         &local_queue) {
@@ -707,8 +725,7 @@ void VrTfReceiver::CalculateIk(
     size_t start_idx = 0;
 
     // Get current joint state as seed for IK
-    sensor_msgs::msg::JointState current_joint_state =
-        GetLatestJointState(gripper_link);
+    JointPositionState current_joint_state = GetLatestJointState(gripper_link);
 
     // Find the IK solver for this gripper link to use AlignJointStateToIk
     auto ik_it = ik_solvers_.find(gripper_link);
@@ -719,8 +736,16 @@ void VrTfReceiver::CalculateIk(
     }
 
     std::vector<double> seed_joints;
-    if (!ik_it->second->AlignJointStateToIk(current_joint_state.name,
-                                            current_joint_state.position,
+
+    // Extract joint names and positions from JointPositionState
+    std::vector<std::string> joint_names;
+    std::vector<double> joint_positions;
+    for (const auto &[name, position] : current_joint_state.joint_positions) {
+      joint_names.push_back(name);
+      joint_positions.push_back(position);
+    }
+
+    if (!ik_it->second->AlignJointStateToIk(joint_names, joint_positions,
                                             seed_joints)) {
       // Use empty seed joints as fallback
       seed_joints.clear();
@@ -759,7 +784,7 @@ void VrTfReceiver::CalculateIk(
   }
 }
 
-void VrTfReceiver::UpdateJointState(
+void VrRobotController::UpdateJointState(
     const sensor_msgs::msg::JointState::SharedPtr msg) {
   // Parse joints in the message and check against each IK solver's joint names
   for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
@@ -770,68 +795,68 @@ void VrTfReceiver::UpdateJointState(
     // Get joint names from the IK solver
     std::vector<std::string> solver_joint_names = ik_solver->GetJointNames();
 
-    // Check if all joints from the solver are present in the message
-    bool all_joints_found = true;
-    std::vector<size_t> joint_indices;
+    // Convert sensor_msgs::msg::JointState to JointPositionState
+    auto joint_state_opt = ConvertJointStateToJointPositionState(
+        msg, gripper_link, solver_joint_names);
 
-    std::for_each(
-        solver_joint_names.begin(), solver_joint_names.end(),
-        [&](const std::string &joint_name) {
-          auto it = std::find_if(msg->name.begin(), msg->name.end(),
-                                 [&joint_name](const std::string &name) {
-                                   return name == joint_name;
-                                 });
-          if (it == msg->name.end()) {
-            all_joints_found = false;
-            return;
-          }
-          joint_indices.push_back(std::distance(msg->name.begin(), it));
-        });
-
-    // If all joints are found, store the message for this gripper_link
-    if (all_joints_found) {
-      // Create a new joint state message with only the relevant joints
-      sensor_msgs::msg::JointState filtered_joint_state;
-      filtered_joint_state.header = msg->header;
-
-      for (size_t idx : joint_indices) {
-        filtered_joint_state.name.push_back(msg->name[idx]);
-        filtered_joint_state.position.push_back(msg->position[idx]);
-
-        // Copy velocity and effort if available
-        if (idx < msg->velocity.size()) {
-          filtered_joint_state.velocity.push_back(msg->velocity[idx]);
-        }
-        if (idx < msg->effort.size()) {
-          filtered_joint_state.effort.push_back(msg->effort[idx]);
-        }
-      }
-
-      // Store the filtered joint state for this gripper
-      {
-        std::unique_lock<std::shared_mutex> lock(latest_joint_state_map_mutex_);
-        latest_joint_state_map_[gripper_link] = filtered_joint_state;
-      }
+    // If conversion was successful, update the map
+    if (joint_state_opt.has_value()) {
+      UpdateLatestJointStateMap(gripper_link, joint_state_opt.value());
     }
   }
 }
 
-sensor_msgs::msg::JointState
-VrTfReceiver::GetLatestJointState(const std::string &gripper_link) const {
+JointPositionState
+VrRobotController::GetLatestJointState(const std::string &gripper_link) const {
+  // Get joint state directly from robot control interface
+  if (!robot_control_interface_) {
+    LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
+    return JointPositionState();
+  }
+
+  // Get the current joint position state from the robot control interface
+  JointPositionState full_joint_state =
+      robot_control_interface_->GetJointPositionState();
+
+  // If we need to filter for specific gripper joints, we need the IK solver
+  auto ik_it = ik_solvers_.find(gripper_link);
+  if (ik_it == ik_solvers_.end() || !ik_it->second ||
+      !ik_it->second->IsInitialized()) {
+    // If no specific gripper IK solver is found, return the full joint state
+    return full_joint_state;
+  }
+
+  // Get the joint names for this specific gripper from the IK solver
+  std::vector<std::string> gripper_joint_names = ik_it->second->GetJointNames();
+
+  // Filter the full joint state to include only joints relevant to this gripper
+  std::vector<std::pair<std::string, double>> filtered_joints;
+  for (const auto &[joint_name, position] : full_joint_state.joint_positions) {
+    auto it = std::find(gripper_joint_names.begin(), gripper_joint_names.end(),
+                        joint_name);
+    if (it != gripper_joint_names.end()) {
+      filtered_joints.emplace_back(joint_name, position);
+    }
+  }
+
+  // Return filtered joint state with same timestamp
+  return JointPositionState(full_joint_state.timestamp_ns, filtered_joints);
+}
+
+JointPositionState VrRobotController::GetLatestJointPositionState(
+    const std::string &gripper_link) const {
   std::shared_lock<std::shared_mutex> lock(latest_joint_state_map_mutex_);
   auto it = latest_joint_state_map_.find(gripper_link);
   if (it != latest_joint_state_map_.end()) {
     return it->second;
   }
 
-  // Return empty joint state if gripper_link not found
-  sensor_msgs::msg::JointState empty_joint_state;
-  return empty_joint_state;
+  // Return empty joint position state if gripper_link not found
+  return JointPositionState();
 }
 
-double
-VrTfReceiver::ConvertTriggerJointPosition(const std::string &gripper_joint_name,
-                                          double trigger_value) const {
+double VrRobotController::ConvertTriggerJointPosition(
+    const std::string &gripper_joint_name, double trigger_value) const {
   if (!trigger_converter_) {
     LE_LOG_ERROR << "Trigger converter not initialized" << std::endl;
     return 0.0;
@@ -848,8 +873,8 @@ VrTfReceiver::ConvertTriggerJointPosition(const std::string &gripper_joint_name,
 }
 
 CusJointCmd
-VrTfReceiver::Convert2CusJointCmd(const std::string &gripper_joint_name,
-                                  double trigger_value) const {
+VrRobotController::Convert2CusJointCmd(const std::string &gripper_joint_name,
+                                       double trigger_value) const {
   // Get the converted joint position using existing function
   double joint_position =
       ConvertTriggerJointPosition(gripper_joint_name, trigger_value);
@@ -862,9 +887,9 @@ VrTfReceiver::Convert2CusJointCmd(const std::string &gripper_joint_name,
   return CusJointCmd(joints);
 }
 
-CusJointCmd
-VrTfReceiver::Convert2CusJointCmd(const std::vector<std::string> &joint_names,
-                                  const std::vector<double> &joint_positions) const {
+CusJointCmd VrRobotController::Convert2CusJointCmd(
+    const std::vector<std::string> &joint_names,
+    const std::vector<double> &joint_positions) const {
   // Validate input sizes match
   if (joint_names.size() != joint_positions.size()) {
     LE_LOG_ERROR << "Joint names size (" << joint_names.size() 
@@ -885,8 +910,9 @@ VrTfReceiver::Convert2CusJointCmd(const std::vector<std::string> &joint_names,
   return CusJointCmd(joints);
 }
 
-void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
-                                   const std::vector<double> &joint_solution) {
+void VrRobotController::PublishJointCmd(
+    const std::string &gripper_link,
+    const std::vector<double> &joint_solution) {
   if (!joint_state_publisher_) {
     LE_LOG_ERROR << "Joint command publisher not initialized" << std::endl;
     return;
@@ -935,8 +961,8 @@ void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
   joint_state_publisher_->publish(joint_state_msg);
 }
 
-void VrTfReceiver::JointCmdEnqueue(const std::string &gripper_link,
-                                   const CusJointCmd &joint_cmd) {
+void VrRobotController::JointCmdEnqueue(const std::string &gripper_link,
+                                        const CusJointCmd &joint_cmd) {
   if (!robot_control_interface_) {
     LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
     return;
@@ -949,8 +975,8 @@ void VrTfReceiver::JointCmdEnqueue(const std::string &gripper_link,
   }
 }
 
-void VrTfReceiver::GripperCmdEnqueue(const std::string &gripper_link,
-                                     const CusJointCmd &gripper_cmd) {
+void VrRobotController::GripperCmdEnqueue(const std::string &gripper_link,
+                                          const CusJointCmd &gripper_cmd) {
   if (!robot_control_interface_) {
     LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
     return;
@@ -963,7 +989,7 @@ void VrTfReceiver::GripperCmdEnqueue(const std::string &gripper_link,
   }
 }
 
-void VrTfReceiver::StartRobotControl() {
+void VrRobotController::StartRobotControl() {
   if (!robot_control_interface_) {
     LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
     return;
@@ -976,7 +1002,7 @@ void VrTfReceiver::StartRobotControl() {
   }
 }
 
-void VrTfReceiver::StopRobotControl() {
+void VrRobotController::StopRobotControl() {
   if (!robot_control_interface_) {
     LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
     return;
@@ -986,6 +1012,164 @@ void VrTfReceiver::StopRobotControl() {
     robot_control_interface_->Stop();
     control_robot_flag_ = false;
     LE_LOG_INFO << "Robot control interface stopped" << std::endl;
+  }
+}
+
+bool VrRobotController::MoveToHomePose() {
+  if (ik_solvers_.empty()) {
+    LE_LOG_ERROR << "No IK solvers available" << std::endl;
+    return false;
+  }
+
+  LE_LOG_INFO << "Moving all robots to home pose (all joints = 0)" << std::endl;
+
+  bool all_success = true;
+
+  // Iterate through all IK solvers to get joint names for each robot
+  for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
+    if (!ik_solver) {
+      LE_LOG_ERROR << "IK solver for " << gripper_link << " is null"
+                   << std::endl;
+      all_success = false;
+      continue;
+    }
+
+    // Get joint names from the IK solver
+    std::vector<std::string> joint_names = ik_solver->GetJointNames();
+    if (joint_names.empty()) {
+      LE_LOG_ERROR << "No joint names found for gripper link: " << gripper_link
+                   << std::endl;
+      all_success = false;
+      continue;
+    }
+
+    // Create home position (all joints = 0)
+    std::vector<double> home_positions(joint_names.size(), 0.0);
+
+    // Convert to CusJointCmd
+    CusJointCmd home_cmd = Convert2CusJointCmd(joint_names, home_positions);
+
+    // Enqueue the command
+    JointCmdEnqueue(gripper_link, home_cmd);
+
+    LE_LOG_INFO << "Enqueued home pose command for " << gripper_link << " with "
+                << joint_names.size() << " joints" << std::endl;
+  }
+
+  if (all_success) {
+    LE_LOG_INFO << "Successfully enqueued home pose commands for all robots"
+                << std::endl;
+  } else {
+    LE_LOG_WARNING << "Some robots failed to enqueue home pose commands"
+                   << std::endl;
+  }
+
+  return all_success;
+}
+
+sensor_msgs::msg::JointState VrRobotController::ConvertToRosJointState(
+    const JointPositionState &joint_position_state) const {
+  sensor_msgs::msg::JointState joint_state_msg;
+  joint_state_msg.header.stamp =
+      rclcpp::Time(joint_position_state.timestamp_ns);
+
+  for (const auto &[joint_name, position] :
+       joint_position_state.joint_positions) {
+    joint_state_msg.name.push_back(joint_name);
+    joint_state_msg.position.push_back(position);
+  }
+
+  // Set velocities and efforts to zero (not available in JointPositionState)
+  joint_state_msg.velocity.resize(joint_state_msg.name.size(), 0.0);
+  joint_state_msg.effort.resize(joint_state_msg.name.size(), 0.0);
+
+  return joint_state_msg;
+}
+
+std::optional<JointPositionState>
+VrRobotController::ConvertJointStateToJointPositionState(
+    const sensor_msgs::msg::JointState::SharedPtr msg,
+    const std::string &gripper_link,
+    const std::vector<std::string> &solver_joint_names) {
+  // Check if all joints from the solver are present in the message
+  bool all_joints_found = true;
+  std::vector<size_t> joint_indices;
+
+  std::for_each(solver_joint_names.begin(), solver_joint_names.end(),
+                [&](const std::string &joint_name) {
+                  auto it =
+                      std::find_if(msg->name.begin(), msg->name.end(),
+                                   [&joint_name](const std::string &name) {
+                                     return name == joint_name;
+                                   });
+                  if (it == msg->name.end()) {
+                    all_joints_found = false;
+                    return;
+                  }
+                  joint_indices.push_back(std::distance(msg->name.begin(), it));
+                });
+
+  // If all joints are found, create JointPositionState
+  if (all_joints_found) {
+    // Create joint name-position pairs
+    std::vector<std::pair<std::string, double>> joint_positions;
+    joint_positions.reserve(joint_indices.size());
+
+    for (size_t idx : joint_indices) {
+      joint_positions.emplace_back(msg->name[idx], msg->position[idx]);
+    }
+
+    // Create JointPositionState with current timestamp
+    return JointPositionState(joint_positions);
+  }
+
+  // Return std::nullopt if not all joints are found
+  return std::nullopt;
+}
+
+void VrRobotController::UpdateLatestJointStateMap(
+    const std::string &gripper_link, const JointPositionState &joint_state) {
+  // Store the joint position state for this gripper with thread safety
+  {
+    std::unique_lock<std::shared_mutex> lock(latest_joint_state_map_mutex_);
+    latest_joint_state_map_[gripper_link] = joint_state;
+  }
+}
+
+void VrRobotController::PublishRobotJointStates() {
+  if (!robot_joint_state_publisher_) {
+    LE_LOG_ERROR << "Robot joint state publisher not initialized" << std::endl;
+    return;
+  }
+
+  // Get all available gripper links from the configuration
+  sensor_msgs::msg::JointState combined_joint_state;
+  combined_joint_state.header.stamp = node_->now();
+  combined_joint_state.header.frame_id = gripper_world_frame_;
+
+  // Collect joint states from all gripper links configured in the system
+  for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
+    // Get the latest joint state for this gripper
+    JointPositionState joint_position_state = GetLatestJointState(gripper_link);
+
+    if (joint_position_state.joint_positions.empty()) {
+      // Skip if no joint state available for this gripper
+      continue;
+    }
+
+    // Add each joint to the combined message
+    for (const auto &[joint_name, position] :
+         joint_position_state.joint_positions) {
+      combined_joint_state.name.push_back(joint_name);
+      combined_joint_state.position.push_back(position);
+      combined_joint_state.velocity.push_back(0.0); // Set velocity to zero
+      combined_joint_state.effort.push_back(0.0);   // Set effort to zero
+    }
+  }
+
+  // Only publish if we have joint data
+  if (!combined_joint_state.name.empty()) {
+    robot_joint_state_publisher_->publish(combined_joint_state);
   }
 }
 

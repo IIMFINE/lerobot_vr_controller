@@ -266,7 +266,8 @@ JointPositionState RobotCommunicateInterface::GetJointPositionState() const {
   auto motor_positions = GetLastReceivedMotorPositions();
 
   if (motor_positions.empty()) {
-    LE_LOG_ERROR << "No motor positions available from robot" << std::endl;
+    LE_LOG_ERROR_T(5s) << "No motor positions available from robot"
+                       << std::endl;
     return joint_state;
   }
 
