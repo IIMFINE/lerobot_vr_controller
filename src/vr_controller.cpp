@@ -42,10 +42,16 @@ VrTfReceiver::~VrTfReceiver() {
   if (ee_to_joint_worker_.joinable()) {
     ee_to_joint_worker_.join();
   }
+
+  // Stop robot control interface
+  StopRobotControl();
 }
 
 bool VrTfReceiver::Initialize(const std::string &yaml_file_path,
-                              const std::string &urdf_file_path) {
+                              const std::string &urdf_file_path,
+                              const std::string &joint_motor_config_file_path,
+                              const std::string &motor_calibration_file_path,
+                              const std::string &motor_cmd_topic) {
   // Perform any additional initialization steps here
   LE_LOG_INFO << "VrTfReceiver::Initialize() called" << std::endl;
 
@@ -66,6 +72,19 @@ bool VrTfReceiver::Initialize(const std::string &yaml_file_path,
     LE_LOG_ERROR << "Failed to initialize IK solvers" << std::endl;
     return false;
   }
+
+  // Initialize robot control interface
+  robot_control_interface_ = std::make_unique<RobotControlInterface>(
+      node_, joint_motor_config_file_path, motor_calibration_file_path,
+      motor_cmd_topic);
+
+  if (!robot_control_interface_->Initialize()) {
+    LE_LOG_ERROR << "Failed to initialize robot control interface" << std::endl;
+    return false;
+  }
+
+  LE_LOG_INFO << "Robot control interface initialized successfully"
+              << std::endl;
 
   return true;
 }
@@ -325,9 +344,9 @@ void VrTfReceiver::CalibrateVr2GripperTf() {
                   << vr_frame << " to " << gripper_link << std::endl;
 
     } catch (const tf2::TransformException &ex) {
-      LE_LOG_ERROR << "Failed to get transform for gripper_link: "
-                   << gripper_link << ", vr_frame: " << vr_frame
-                   << ". Error: " << ex.what() << std::endl;
+      LE_LOG_ERROR_T(1s) << "Failed to get transform for gripper_link: "
+                         << gripper_link << ", vr_frame: " << vr_frame
+                         << ". Error: " << ex.what() << std::endl;
     }
   }
 
@@ -451,12 +470,30 @@ void VrTfReceiver::JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg,
                                     const std::string &topic_name) {
   // VR controller button indices
   constexpr const int kTriggerButton = 0;
+  constexpr const int kSideTriggerButton = 1;
   constexpr const int kBButton = 5;
+
+  constexpr const int kSideTriggerThreshold = 200;
 
   // Check if buttons array has at least 6 elements (B button index)
   if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
     should_calibrate_ = true;
-    LE_LOG_INFO << "Calibration triggered by joystick B button" << std::endl;
+    LE_LOG_INFO_T(1s) << "Calibration triggered by joystick B button"
+                      << std::endl;
+  }
+
+  // Control robot_control_interface_ based on side trigger button value
+  if (msg->buttons.size() > kSideTriggerButton && robot_control_interface_) {
+    int side_trigger_value = msg->buttons[kSideTriggerButton];
+    if (side_trigger_value > kSideTriggerThreshold) {
+      StartRobotControl();
+      LE_LOG_INFO_T(5s) << "Robot control triggered by side trigger: "
+                        << side_trigger_value << std::endl;
+    } else {
+      StopRobotControl();
+      LE_LOG_INFO_T(5s) << "Robot control stopped by side trigger: "
+                        << side_trigger_value << std::endl;
+    }
   }
 
   // Handle trigger input for gripper control based on joint_mappings
@@ -474,7 +511,18 @@ void VrTfReceiver::JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg,
         }
 
         // Convert trigger value to gripper joint position
-        ConvertTriggerJointPosition(joint_name, trigger_value);
+        auto gripper_position =
+            ConvertTriggerJointPosition(joint_name, trigger_value);
+
+        // Convert trigger value to CusJointCmd and send to control robot
+        // gripper
+        LE_LOG_INFO_T(1s) << "JoystickCallback: Mapped joint: " << joint_name
+                          << ", VR topic: " << vr_topic
+                          << ", Trigger value: " << trigger_value
+                          << ", Gripper position: " << gripper_position
+                          << std::endl;
+        auto gripper_cmd = Convert2CusJointCmd(joint_name, trigger_value);
+        GripperCmdEnqueue(joint_name, gripper_cmd);
       }
     }
   }
@@ -642,12 +690,12 @@ void VrTfReceiver::EeToJointWorkerLoop() {
 
     // Process local_queue and convert EE targets to joint states
     if (!local_queue.empty()) {
-      ControlJointWithEe(local_queue);
+      CalculateIk(local_queue);
     }
   }
 }
 
-void VrTfReceiver::ControlJointWithEe(
+void VrTfReceiver::CalculateIk(
     const std::map<std::string,
                    std::deque<geometry_msgs::msg::TransformStamped>>
         &local_queue) {
@@ -701,10 +749,12 @@ void VrTfReceiver::ControlJointWithEe(
       // Update seed for next iteration
       seed_joints = joint_solution;
 
-      // Only publish the final solution to reduce message load
-      if (i == pose_queue.size() - 1) {
-        PublishJointCmd(gripper_link, joint_solution);
-      }
+      PublishJointCmd(gripper_link, joint_solution);
+
+      // Send pose to control robot using joint solution
+      std::vector<std::string> joint_names = ik_it->second->GetJointNames();
+      CusJointCmd joint_cmd = Convert2CusJointCmd(joint_names, joint_solution);
+      JointCmdEnqueue(gripper_link, joint_cmd);
     }
   }
 }
@@ -797,6 +847,44 @@ VrTfReceiver::ConvertTriggerJointPosition(const std::string &gripper_joint_name,
                                                   trigger_value);
 }
 
+CusJointCmd
+VrTfReceiver::Convert2CusJointCmd(const std::string &gripper_joint_name,
+                                  double trigger_value) const {
+  // Get the converted joint position using existing function
+  double joint_position =
+      ConvertTriggerJointPosition(gripper_joint_name, trigger_value);
+
+  // Create joint name-position pair
+  std::vector<std::pair<std::string, double>> joints;
+  joints.emplace_back(gripper_joint_name, joint_position);
+
+  // Create and return CusJointCmd with current timestamp and joint data
+  return CusJointCmd(joints);
+}
+
+CusJointCmd
+VrTfReceiver::Convert2CusJointCmd(const std::vector<std::string> &joint_names,
+                                  const std::vector<double> &joint_positions) const {
+  // Validate input sizes match
+  if (joint_names.size() != joint_positions.size()) {
+    LE_LOG_ERROR << "Joint names size (" << joint_names.size() 
+                 << ") doesn't match joint positions size (" << joint_positions.size() << ")"
+                 << std::endl;
+    return CusJointCmd(); // Return empty command
+  }
+
+  // Create vector of joint name-position pairs
+  std::vector<std::pair<std::string, double>> joints;
+  joints.reserve(joint_names.size());
+  
+  for (size_t i = 0; i < joint_names.size(); ++i) {
+    joints.emplace_back(joint_names[i], joint_positions[i]);
+  }
+
+  // Create and return CusJointCmd with current timestamp and joint data
+  return CusJointCmd(joints);
+}
+
 void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
                                    const std::vector<double> &joint_solution) {
   if (!joint_state_publisher_) {
@@ -847,28 +935,58 @@ void VrTfReceiver::PublishJointCmd(const std::string &gripper_link,
   joint_state_publisher_->publish(joint_state_msg);
 }
 
-void VrTfReceiver::JointCmdEnqueue(
-    const std::string &gripper_link,
-    const sensor_msgs::msg::JointState &joint_cmd) {
-  std::unique_lock<std::shared_mutex> lock(joint_cmd_queue_mutex_);
+void VrTfReceiver::JointCmdEnqueue(const std::string &gripper_link,
+                                   const CusJointCmd &joint_cmd) {
+  if (!robot_control_interface_) {
+    LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
+    return;
+  }
 
-  // Add the joint command to the queue for the specified gripper link
-  joint_cmd_queue_[gripper_link].push_back(joint_cmd);
-
-  // Notify waiting threads that a new command is available
-  joint_cmd_queue_cond_.notify_one();
+  // Enqueue the command to the robot control interface directly
+  if (!robot_control_interface_->EnqueueJointCommand(joint_cmd)) {
+    LE_LOG_ERROR_T(5s) << "Failed to enqueue joint command for gripper: "
+                       << gripper_link << std::endl;
+  }
 }
 
-void VrTfReceiver::GripperCmdEnqueue(
-    const std::string &gripper_link,
-    const sensor_msgs::msg::JointState &gripper_cmd) {
-  std::unique_lock<std::shared_mutex> lock(gripper_cmd_queue_mutex_);
+void VrTfReceiver::GripperCmdEnqueue(const std::string &gripper_link,
+                                     const CusJointCmd &gripper_cmd) {
+  if (!robot_control_interface_) {
+    LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
+    return;
+  }
 
-  // Add the gripper command to the queue for the specified gripper link
-  gripper_cmd_queue_[gripper_link].push_back(gripper_cmd);
+  // Enqueue the command to the robot control interface directly
+  if (!robot_control_interface_->EnqueueGripperCommand(gripper_cmd)) {
+    LE_LOG_ERROR_T(5s) << "Failed to enqueue gripper command for gripper: "
+                       << gripper_link << std::endl;
+  }
+}
 
-  // Notify waiting threads that a new command is available
-  gripper_cmd_queue_cond_.notify_one();
+void VrTfReceiver::StartRobotControl() {
+  if (!robot_control_interface_) {
+    LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
+    return;
+  }
+
+  if (!control_robot_flag_) {
+    robot_control_interface_->Start();
+    control_robot_flag_ = true;
+    LE_LOG_INFO << "Robot control interface started" << std::endl;
+  }
+}
+
+void VrTfReceiver::StopRobotControl() {
+  if (!robot_control_interface_) {
+    LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
+    return;
+  }
+
+  if (control_robot_flag_) {
+    robot_control_interface_->Stop();
+    control_robot_flag_ = false;
+    LE_LOG_INFO << "Robot control interface stopped" << std::endl;
+  }
 }
 
 } // namespace lerobot_vr_controller

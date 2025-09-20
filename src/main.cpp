@@ -32,7 +32,27 @@ int main(int argc, char **argv) {
   node->declare_parameter<std::string>("urdf_file", urdf_file_path);
   node->get_parameter("urdf_file", urdf_file_path);
 
-  if (!vr_tf_receiver->Initialize(yaml_config_path, urdf_file_path)) {
+  // Robot control configuration paths
+  std::string joint_motor_config_path =
+      "config/motor/so101_follower/joint_motor_config.yaml";
+  std::string motor_calibration_path =
+      "config/motor/so101_follower/motor_calibration.yaml";
+  std::string motor_cmd_topic = "/robot_control/motor_cmd";
+
+  // Try to get robot control config paths from parameters
+  node->declare_parameter<std::string>("joint_motor_config_file",
+                                       joint_motor_config_path);
+  node->get_parameter("joint_motor_config_file", joint_motor_config_path);
+
+  node->declare_parameter<std::string>("motor_calibration_file",
+                                       motor_calibration_path);
+  node->get_parameter("motor_calibration_file", motor_calibration_path);
+
+  constexpr const char *kMotorCmdTopic = "/robot_control/motor_cmd";
+
+  if (!vr_tf_receiver->Initialize(yaml_config_path, urdf_file_path,
+                                  joint_motor_config_path,
+                                  motor_calibration_path, kMotorCmdTopic)) {
     RCLCPP_ERROR(node->get_logger(), "Failed to initialize VR TF receiver");
     return 1;
   }

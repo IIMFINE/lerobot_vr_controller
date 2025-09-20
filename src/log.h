@@ -63,16 +63,18 @@ inline bool shouldLogWithThrottle(std::chrono::milliseconds interval) {
 // LE_LOG_INFO 宏定义 - 支持流式输出
 #define LE_LOG_INFO                                                            \
   std::cout << "[" << getCurrentTimestamp() << "]"                             \
-            << "[info]"                                                        \
+            << "[I]"                                                           \
             << "[" << getThreadId() << "]"                                     \
-            << "[" << getFileName(__FILE__) << ":" << __LINE__ << "] "
+            << "[" << getFileName(__FILE__) << ":" << __LINE__ << "]"          \
+            << "[" << __FUNCTION__ << "] "
 
 // LE_LOG_ERROR 宏定义 - 支持流式输出，使用 std::cerr
 #define LE_LOG_ERROR                                                           \
   std::cerr << "[" << getCurrentTimestamp() << "]"                             \
-            << "[error]"                                                       \
+            << "[E]"                                                           \
             << "[" << getThreadId() << "]"                                     \
-            << "[" << getFileName(__FILE__) << ":" << __LINE__ << "] "
+            << "[" << getFileName(__FILE__) << ":" << __LINE__ << "]"          \
+            << "[" << __FUNCTION__ << "] "
 
 // 字符串化宏
 #define STRINGIFY(x) #x
@@ -81,18 +83,20 @@ inline bool shouldLogWithThrottle(std::chrono::milliseconds interval) {
 #define LE_LOG_INFO_T(interval)                                                \
   if (shouldLogWithThrottle<__LINE__>(to_milliseconds(interval)))              \
   std::cout << "[" << getCurrentTimestamp() << "]"                             \
-            << "[info]"                                                        \
-            << "[" << STRINGIFY(interval) << "]"                               \
+            << "[I]"                                                           \
             << "[" << getThreadId() << "]"                                     \
-            << "[" << getFileName(__FILE__) << ":" << __LINE__ << "] "
+            << "[" << getFileName(__FILE__) << ":" << __LINE__ << "]"          \
+            << "[" << __FUNCTION__ << "]"                                      \
+            << "[" << STRINGIFY(interval) << "] "
 
 // LE_LOG_ERROR_T 宏定义 - 支持时间间隔控制的流式输出
 #define LE_LOG_ERROR_T(interval)                                               \
   if (shouldLogWithThrottle<__LINE__>(to_milliseconds(interval)))              \
   std::cerr << "[" << getCurrentTimestamp() << "]"                             \
-            << "[error]"                                                       \
-            << "[" << STRINGIFY(interval) << "]"                               \
+            << "[E]"                                                           \
             << "[" << getThreadId() << "]"                                     \
-            << "[" << getFileName(__FILE__) << ":" << __LINE__ << "] "
+            << "[" << getFileName(__FILE__) << ":" << __LINE__ << "]"          \
+            << "[" << __FUNCTION__ << "]"                                      \
+            << "[" << STRINGIFY(interval) << "] "
 
 #endif // LOG_H

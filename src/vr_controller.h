@@ -25,6 +25,11 @@
 #include "vr_trigger_joint_convert.h"
 #include "yaml-cpp/yaml.h"
 
+#include "interface_type.h"
+#include "log.h"
+#include "robot_communicate_interface.h"
+#include "robot_control_interface.h"
+
 namespace lerobot_vr_controller {
 
 // Constants
@@ -38,8 +43,12 @@ public:
   ~VrTfReceiver();
 
   // Initialize the VR TF receiver with YAML configuration
-  bool Initialize(const std::string &yaml_file_path,
-                  const std::string &urdf_file_path);
+  bool
+  Initialize(const std::string &yaml_file_path,
+             const std::string &urdf_file_path,
+             const std::string &joint_motor_config_file_path,
+             const std::string &motor_calibration_file_path,
+             const std::string &motor_cmd_topic = "/robot_control/motor_cmd");
 
   // Start receiving VR data
   void Start();
@@ -51,6 +60,20 @@ public:
   // Convert VR trigger value to gripper joint position
   double ConvertTriggerJointPosition(const std::string &gripper_link,
                                      double trigger_value) const;
+
+  // Convert VR trigger value to CusJointCmd
+  CusJointCmd Convert2CusJointCmd(const std::string &gripper_joint_name,
+                                  double trigger_value) const;
+
+  // Convert vector of joint names and positions to CusJointCmd
+  CusJointCmd Convert2CusJointCmd(const std::vector<std::string> &joint_names,
+                                  const std::vector<double> &joint_positions) const;
+
+  // Start robot control interface
+  void StartRobotControl();
+
+  // Stop robot control interface
+  void StopRobotControl();
 
 private:
   bool InitIkSolver();
@@ -77,10 +100,10 @@ private:
   bool LoadYamlConfig(const std::string &yaml_file_path);
 
   // Control joint with end effector poses from local queue
-  void ControlJointWithEe(
-      const std::map<std::string,
-                     std::deque<geometry_msgs::msg::TransformStamped>>
-          &local_queue);
+  void
+  CalculateIk(const std::map<std::string,
+                             std::deque<geometry_msgs::msg::TransformStamped>>
+                  &local_queue);
 
   // Worker loop that watches the target_ee_pose_queue_ and triggers
   // EePoseIktoJointCmd
@@ -95,11 +118,11 @@ private:
 
   // Enqueue joint command to joint_cmd_queue_
   void JointCmdEnqueue(const std::string &gripper_link,
-                       const sensor_msgs::msg::JointState &joint_cmd);
+                       const CusJointCmd &joint_cmd);
 
   // Enqueue gripper command to gripper_cmd_queue_
   void GripperCmdEnqueue(const std::string &gripper_link,
-                         const sensor_msgs::msg::JointState &gripper_cmd);
+                         const CusJointCmd &gripper_cmd);
 
   // Node pointer passed from main
   std::shared_ptr<rclcpp::Node> node_;
@@ -199,7 +222,13 @@ private:
   std::condition_variable gripper_cmd_queue_cond_;
   std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
       gripper_cmd_queue_;
+
   std::shared_mutex gripper_cmd_queue_mutex_;
+
+  std::atomic<bool> control_robot_flag_{false};
+
+  // Robot control interface for managing joint and gripper commands
+  std::unique_ptr<RobotControlInterface> robot_control_interface_;
 };
 
 } // namespace lerobot_vr_controller
