@@ -58,9 +58,10 @@ public:
              const std::string &motor_calibration_file_path,
              const std::string &motor_cmd_topic = "/robot_control/motor_cmd");
 
-  // Start receiving VR data
+  // === Core Control Functions ===
   void Start();
 
+  // === Joint State Functions ===
   // Get the latest joint state snapshot for a specific gripper
   JointPositionState GetLatestJointState(const std::string &gripper_link) const;
 
@@ -73,6 +74,7 @@ public:
   sensor_msgs::msg::JointState
   ConvertToRosJointState(const JointPositionState &joint_position_state) const;
 
+  // === Conversion Functions ===
   // Convert VR trigger value to gripper joint position
   double ConvertTriggerJointPosition(const std::string &gripper_link,
                                      double trigger_value) const;
@@ -85,6 +87,7 @@ public:
   CusJointCmd Convert2CusJointCmd(const std::vector<std::string> &joint_names,
                                   const std::vector<double> &joint_positions) const;
 
+  // === Robot Control Functions ===
   // Start robot control interface
   void StartRobotControl();
 
@@ -95,28 +98,13 @@ public:
   bool MoveToHomePose();
 
 private:
+  // === IK Solver Functions ===
   bool InitIkSolver();
 
   bool IkGripperTf(const std::string &gripper_link,
                    const tf2::Transform &target_transform,
                    std::vector<double> &joint_solution,
                    const std::vector<double> &seed_joints = {});
-
-  tf2::Transform Vr2GripperTf(const std::string &gripper_link,
-                              const std::string &vr_frame);
-
-  void CalibrateVr2GripperTf();
-
-  void Vr2GripperTfPublish();
-
-  // Similar to Vr2GripperTfPublish but enqueue target EE poses instead of
-  // broadcasting TF
-  void UpdateVrPose();
-
-  void JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg, const std::string &topic_name);
-
-  // Load configuration from YAML
-  bool LoadYamlConfig(const std::string &yaml_file_path);
 
   // Control joint with end effector poses from local queue
   void
@@ -128,9 +116,29 @@ private:
   // EePoseIktoJointCmd
   void EeToJointWorkerLoop();
 
+  // === VR Transform Functions ===
+  tf2::Transform Vr2GripperTf(const std::string &gripper_link,
+                              const std::string &vr_frame);
+
+  void CalibrateVr2GripperTf();
+
+  void Vr2GripperTfPublish();
+
+  // Similar to Vr2GripperTfPublish but enqueue target EE poses instead of
+  // broadcasting TF
+  void UpdateVrPose();
+
+  // === Callback Functions ===
+  void JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg, const std::string &topic_name);
+
   // Callback to update latest joint state
   void UpdateJointState(const sensor_msgs::msg::JointState::SharedPtr msg);
 
+  // === Configuration Functions ===
+  // Load configuration from YAML
+  bool LoadYamlConfig(const std::string &yaml_file_path);
+
+  // === Joint State Conversion Functions ===
   // Convert sensor_msgs::msg::JointState to JointPositionState for specific
   // gripper
   std::optional<JointPositionState> ConvertJointStateToJointPositionState(
@@ -142,10 +150,7 @@ private:
   void UpdateLatestJointStateMap(const std::string &gripper_link,
                                  const JointPositionState &joint_state);
 
-  // Publish joint commands for rviz2 visualization
-  void PublishJointCmd(const std::string &gripper_link,
-                       const std::vector<double> &joint_solution);
-
+  // === Command Queue Functions ===
   // Enqueue joint command to joint_cmd_queue_
   void JointCmdEnqueue(const std::string &gripper_link,
                        const CusJointCmd &joint_cmd);
@@ -154,12 +159,19 @@ private:
   void GripperCmdEnqueue(const std::string &gripper_link,
                          const CusJointCmd &gripper_cmd);
 
+  // === Publishing Functions ===
+  // Publish joint commands for rviz2 visualization
+  void PublishJointCmd(const std::string &gripper_link,
+                       const std::vector<double> &joint_solution);
+
   // Publish current robot joint states at 100Hz
   void PublishRobotJointStates();
 
+  // === Core Components ===
   // Node pointer passed from main
   std::shared_ptr<rclcpp::Node> node_;
 
+  // === Callback Groups ===
   // Callback groups for different operations
   rclcpp::CallbackGroup::SharedPtr calibration_callback_group_;
   rclcpp::CallbackGroup::SharedPtr publish_callback_group_;
@@ -168,6 +180,7 @@ private:
   rclcpp::CallbackGroup::SharedPtr joint_state_callback_group_;
   rclcpp::CallbackGroup::SharedPtr joint_state_publish_callback_group_;
 
+  // === TF Components ===
   // TF broadcaster
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
@@ -175,6 +188,7 @@ private:
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
 
+  // === Configuration Data ===
   // Configuration file path
   std::string yaml_config_path_;
 
@@ -187,6 +201,14 @@ private:
   std::string gripper_world_frame_;
   std::string vr_world_frame_;
 
+  // IK tolerance configurations loaded from YAML
+  double position_tolerance_;
+  double orientation_tolerance_;
+
+  // Mapping from joint name to VR topic for trigger control
+  std::map<std::string, std::string> joint_to_vr_topic_map_;
+
+  // === VR Calibration Data ===
   std::atomic<bool> should_calibrate_{false};
   std::atomic<bool> calibrated_flag_{false};
 
@@ -194,19 +216,38 @@ private:
   std::map<std::string, geometry_msgs::msg::TransformStamped>
       vr_base_link_dummy_tf_;
 
-  // Queue of target EE poses per gripper link
-  std::map<std::string, std::deque<geometry_msgs::msg::TransformStamped>>
-      target_ee_pose_queue_;
+  std::map<std::string, tf2::Quaternion> vr_wrist_to_gripper_rot_;
 
   // Shared mutex for thread-safe access to vr_base_link_dummy_tf_
   mutable std::shared_mutex vr_base_link_dummy_tf_mutex_;
+
+  // === Pose Queue Data ===
+  // Queue of target EE poses per gripper link
+  std::map<std::string, std::deque<geometry_msgs::msg::TransformStamped>>
+      target_ee_pose_queue_;
 
   // Mutex + condition variable for target_ee_pose_queue_
   mutable std::mutex target_ee_pose_queue_mutex_;
   std::condition_variable target_ee_pose_queue_cond_;
 
-  std::map<std::string, tf2::Quaternion> vr_wrist_to_gripper_rot_;
+  // === Command Queue Data ===
+  std::shared_mutex joint_cmd_queue_mutex_;
+  std::condition_variable joint_cmd_queue_cond_;
+  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
+      joint_cmd_queue_;
 
+  std::shared_mutex gripper_cmd_queue_mutex_;
+  std::condition_variable gripper_cmd_queue_cond_;
+  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
+      gripper_cmd_queue_;
+
+  // === Joint State Data ===
+  std::map<std::string, JointPositionState> latest_joint_state_map_;
+
+  // Shared mutex for thread-safe access to latest_joint_state_map_
+  mutable std::shared_mutex latest_joint_state_map_mutex_;
+
+  // === Timers ===
   // Timer for calibration at 10Hz
   rclcpp::TimerBase::SharedPtr calibration_timer_;
 
@@ -219,6 +260,7 @@ private:
   // Timer for publishing joint states at 100Hz
   rclcpp::TimerBase::SharedPtr joint_state_publish_timer_;
 
+  // === Subscribers ===
   // Joystick subscriber
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscriber_;
 
@@ -226,11 +268,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr
       joint_state_subscriber_;
 
-  std::map<std::string, JointPositionState> latest_joint_state_map_;
-
-  // Shared mutex for thread-safe access to latest_joint_state_map_
-  mutable std::shared_mutex latest_joint_state_map_mutex_;
-
+  // === Publishers ===
   // Joint command publisher for rviz2 visualization
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr
       joint_state_publisher_;
@@ -239,37 +277,23 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr
       robot_joint_state_publisher_;
 
+  // === Control Components ===
   // IK solvers for each gripper link
   std::map<std::string, std::unique_ptr<SoArm101Kinematics>> ik_solvers_;
 
   // VR trigger to joint converter
   std::unique_ptr<vr_controller::VrTriggerJointConvert> trigger_converter_;
 
-  // Mapping from joint name to VR topic for trigger control
-  std::map<std::string, std::string> joint_to_vr_topic_map_;
+  // Robot control interface for managing joint and gripper commands
+  std::unique_ptr<RobotControlInterface> robot_control_interface_;
 
-  // IK tolerance configurations loaded from YAML
-  double position_tolerance_;
-  double orientation_tolerance_;
-
+  // === Worker Threads ===
   // Dedicated worker thread to process EE targets into joint commands
   std::atomic<bool> ee_to_joint_worker_running_{false};
   std::thread ee_to_joint_worker_;
 
-  std::shared_mutex joint_cmd_queue_mutex_;
-  std::condition_variable joint_cmd_queue_cond_;
-  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
-      joint_cmd_queue_;
-  std::condition_variable gripper_cmd_queue_cond_;
-  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
-      gripper_cmd_queue_;
-
-  std::shared_mutex gripper_cmd_queue_mutex_;
-
+  // === Control Flags ===
   std::atomic<bool> control_robot_flag_{false};
-
-  // Robot control interface for managing joint and gripper commands
-  std::unique_ptr<RobotControlInterface> robot_control_interface_;
 };
 
 } // namespace lerobot_vr_controller

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import os
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -8,6 +10,14 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
+    # Get the package directory
+    pkg_dir = get_package_share_directory("lerobot_vr_controller")
+
+    # Path to URDF file and read it
+    urdf_file_path = os.path.join(pkg_dir, "model", "so101_new_calib.urdf")
+    with open(urdf_file_path, "r") as infp:
+        robot_desc = infp.read()
+
     # Declare launch arguments
     config_file_arg = DeclareLaunchArgument(
         "config_file",
@@ -86,6 +96,15 @@ def generate_launch_description():
         # respawn_delay=2.0,
     )
 
+    # Robot State Publisher Node
+    robot_state_publisher_node = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        name="robot_state_publisher",
+        output="screen",
+        parameters=[{"robot_description": robot_desc}],
+    )
+
     return LaunchDescription(
         [
             config_file_arg,
@@ -94,5 +113,6 @@ def generate_launch_description():
             joint_motor_config_file_arg,
             motor_calibration_file_arg,
             vr_tf_receiver_node,
+            robot_state_publisher_node,
         ]
     )
