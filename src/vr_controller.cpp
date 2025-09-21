@@ -117,7 +117,7 @@ void VrRobotController::Start() {
 
   // Add VR to gripper TF enqueue timer at 50Hz (reduced from 200Hz)
   vr_to_gripper_enqueue_timer_ = node_->create_wall_timer(
-      std::chrono::milliseconds(20),
+      std::chrono::milliseconds(10),
       std::bind(&VrRobotController::UpdateVrPose, this),
       enqueue_callback_group_);
 
@@ -298,7 +298,9 @@ void VrRobotController::CalibrateVr2GripperTf() {
     return;
   }
 
-  calibrated_flag_ = false;
+  if (control_robot_flag_) {
+    return;
+  }
 
   {
     std::unique_lock<std::shared_mutex> lock(vr_base_link_dummy_tf_mutex_);
@@ -485,13 +487,13 @@ void VrRobotController::JoystickCallback(
 
   // Check if buttons array has at least 6 elements (B button index)
   if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
+    should_calibrate_ = true;
     StartRobotControl();
     MoveToHomePose();
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     StopRobotControl();
     LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
                       << std::endl;
-    should_calibrate_ = true;
     LE_LOG_INFO_T(1s) << "Calibration triggered by joystick B button"
                       << std::endl;
   }
@@ -964,7 +966,7 @@ void VrRobotController::PublishJointCmd(
 void VrRobotController::TargetVrPoseEnqueue(
     const std::string &gripper_link, geometry_msgs::msg::TransformStamped ts) {
 
-  if (!control_robot_flag_) {
+  if (!IsControlRobot()) {
     return;
   }
 
