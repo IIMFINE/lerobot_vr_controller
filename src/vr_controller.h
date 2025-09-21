@@ -14,6 +14,7 @@
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
+#include "joint_position_filter.h"
 #include "kinematics.h"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
@@ -104,6 +105,9 @@ public:
 private:
   // === IK Solver Functions ===
   bool InitIkSolver();
+
+  // Initialize joint position filters for all grippers
+  void InitJointFilters();
 
   bool IkGripperTf(const std::string &gripper_link,
                    const tf2::Transform &target_transform,
@@ -213,6 +217,9 @@ private:
   double position_tolerance_;
   double orientation_tolerance_;
 
+  // Joint filter configurations loaded from YAML
+  double filter_alpha_; // 滤波器平滑因子
+
   // Mapping from joint name to VR topic for trigger control
   std::map<std::string, std::string> joint_to_vr_topic_map_;
 
@@ -289,6 +296,11 @@ private:
   // IK solvers for each gripper link
   std::map<std::string, std::unique_ptr<SoArm101Kinematics>> ik_solvers_;
 
+  // Joint position filters for each gripper link and joint
+  std::map<std::string,
+           std::map<std::string, std::unique_ptr<JointPositionFilter>>>
+      joint_filters_;
+
   // VR trigger to joint converter
   std::unique_ptr<vr_controller::VrTriggerJointConvert> trigger_converter_;
 
@@ -302,6 +314,10 @@ private:
 
   // === Control Flags ===
   std::atomic<bool> control_robot_flag_{false};
+
+  // === Home Pose Configuration ===
+  // Home pose joint positions loaded from YAML configuration
+  JointPositionState home_pose_joint_position_;
 };
 
 } // namespace lerobot_vr_controller

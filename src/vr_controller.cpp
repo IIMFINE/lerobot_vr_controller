@@ -224,6 +224,37 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
           << std::endl;
     }
 
+    // Load joint filter configurations
+    // Example YAML configuration:
+    // joint_filter:
+    //   alpha: 0.3  # Smoothing factor (0.0 < alpha <= 1.0)
+    //               # Lower values = stronger filtering, slower response
+    //               # Higher values = weaker filtering, faster response
+    if (config["joint_filter"]) {
+      auto filter_config = config["joint_filter"];
+
+      if (filter_config["alpha"]) {
+        filter_alpha_ = filter_config["alpha"].as<double>();
+        // 验证alpha值范围
+        if (filter_alpha_ <= 0.0 || filter_alpha_ > 1.0) {
+          LE_LOG_ERROR << "Invalid filter alpha value: " << filter_alpha_
+                       << ", using default 0.3" << std::endl;
+          filter_alpha_ = 0.3;
+        }
+        LE_LOG_INFO << "Loaded joint filter alpha: " << filter_alpha_
+                    << std::endl;
+      } else {
+        filter_alpha_ = 0.3; // default value
+        LE_LOG_INFO << "Using default joint filter alpha: " << filter_alpha_
+                    << std::endl;
+      }
+    } else {
+      // Use default value if joint_filter section is missing
+      filter_alpha_ = 0.3;
+      LE_LOG_INFO << "joint_filter section not found, using default alpha: "
+                  << filter_alpha_ << std::endl;
+    }
+
     // Configure VR trigger to joint converter
     double trigger_scale = 0.0068; // Default value
     // Parse trigger_config section for joint mappings
@@ -278,6 +309,45 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
 
       LE_LOG_INFO << "Loaded mapping: " << vr_link << " -> " << gripper_link
                   << std::endl;
+    }
+
+    // Parse home_pose configuration
+    if (config["joint_pose"] && config["joint_pose"]["home_pose"]) {
+      auto home_pose_config = config["joint_pose"]["home_pose"];
+
+      if (home_pose_config["joint_name"] && home_pose_config["position"]) {
+        auto joint_names =
+            home_pose_config["joint_name"].as<std::vector<std::string>>();
+        auto positions = home_pose_config["position"].as<std::vector<double>>();
+
+        if (joint_names.size() == positions.size()) {
+          std::vector<std::pair<std::string, double>> joint_position_pairs;
+          for (size_t i = 0; i < joint_names.size(); ++i) {
+            joint_position_pairs.emplace_back(joint_names[i], positions[i]);
+          }
+
+          home_pose_joint_position_ = JointPositionState(joint_position_pairs);
+
+          LE_LOG_INFO << "Loaded home pose configuration with "
+                      << joint_names.size() << " joints" << std::endl;
+          for (size_t i = 0; i < joint_names.size(); ++i) {
+            LE_LOG_INFO << "  " << joint_names[i] << ": " << positions[i]
+                        << std::endl;
+          }
+        } else {
+          LE_LOG_ERROR << "Mismatch between joint_name and position array "
+                          "sizes in home_pose configuration"
+                       << std::endl;
+        }
+      } else {
+        LE_LOG_ERROR
+            << "Missing joint_name or position in home_pose configuration"
+            << std::endl;
+      }
+    } else {
+      LE_LOG_INFO
+          << "No home_pose configuration found, using default (all joints = 0)"
+          << std::endl;
     }
 
     return true;
@@ -634,7 +704,46 @@ bool VrRobotController::InitIkSolver() {
                 << solver->GetNumJoints() << " joints" << std::endl;
   }
 
+  // Initialize joint position filters after IK solvers are ready
+  InitJointFilters();
+
   return true;
+}
+
+void VrRobotController::InitJointFilters() {
+  // Clear any existing filters
+  joint_filters_.clear();
+
+  // Use configured filter alpha value
+  constexpr double kDefaultInitialValue = 0.0;
+
+  // Initialize filters for each gripper's IK-controlled joints
+  // Note: These filters are only used for joints controlled through IK solver,
+  // not for trigger-controlled joints (gripper joints)
+  for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
+    if (!ik_solver || !ik_solver->IsInitialized()) {
+      continue;
+    }
+
+    // Get joint names for this gripper (IK-controlled joints only)
+    const auto joint_names = ik_solver->GetJointNames();
+
+    // Initialize filters for each IK-controlled joint
+    auto &gripper_filters = joint_filters_[gripper_link];
+    for (const auto &joint_name : joint_names) {
+      gripper_filters[joint_name] = std::make_unique<JointPositionFilter>(
+          filter_alpha_, kDefaultInitialValue);
+    }
+
+    LE_LOG_INFO << "Initialized " << joint_names.size()
+                << " joint filters (alpha=" << filter_alpha_
+                << ") for IK-controlled joints of gripper: " << gripper_link
+                << std::endl;
+  }
+
+  LE_LOG_INFO << "Successfully initialized joint position filters for "
+              << joint_filters_.size()
+              << " grippers (IK-controlled joints only)" << std::endl;
 }
 
 bool VrRobotController::IkGripperTf(const std::string &gripper_link,
@@ -770,14 +879,43 @@ void VrRobotController::CalculateIk(
         continue;
       }
 
-      // Update seed for next iteration
-      seed_joints = joint_solution;
+      // Apply joint position filtering to IK solution
+      // Note: Only IK-controlled joints are filtered, trigger-controlled joints
+      // bypass filtering
+      std::vector<double> filtered_joint_solution;
+      if (auto filter_it = joint_filters_.find(gripper_link);
+          filter_it != joint_filters_.end()) {
+        const auto joint_names = ik_it->second->GetJointNames();
+        filtered_joint_solution.reserve(joint_solution.size());
 
-      PublishJointCmd(gripper_link, joint_solution);
+        for (size_t j = 0; j < joint_solution.size(); ++j) {
+          if (j < joint_names.size()) {
+            const auto &joint_name = joint_names[j];
+            if (auto joint_filter_it = filter_it->second.find(joint_name);
+                joint_filter_it != filter_it->second.end()) {
+              // Apply filtering to this IK-controlled joint
+              filtered_joint_solution.push_back(
+                  joint_filter_it->second->Filter(joint_solution[j]));
+              continue;
+            }
+          }
+          filtered_joint_solution.push_back(joint_solution[j]);
+        }
+      } else {
+        // No filters for this gripper, use original solution
+        filtered_joint_solution = joint_solution;
+      }
 
-      // Send pose to control robot using joint solution
+      // Update seed for next iteration (use filtered values for smoother
+      // trajectory)
+      seed_joints = filtered_joint_solution;
+
+      PublishJointCmd(gripper_link, filtered_joint_solution);
+
+      // Send pose to control robot using filtered joint solution
       std::vector<std::string> joint_names = ik_it->second->GetJointNames();
-      CusJointCmd joint_cmd = Convert2CusJointCmd(joint_names, joint_solution);
+      CusJointCmd joint_cmd =
+          Convert2CusJointCmd(joint_names, filtered_joint_solution);
       JointCmdEnqueue(gripper_link, joint_cmd);
     }
   }
@@ -1045,56 +1183,150 @@ bool VrRobotController::MoveToHomePose() {
     return false;
   }
 
-  LE_LOG_INFO << "Moving all robots to home pose (all joints = 0)" << std::endl;
+  LE_LOG_INFO << "Moving all robots to home pose" << std::endl;
 
   bool all_success = true;
 
-  // Iterate through all IK solvers to get joint names for each robot
-  for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
-    if (!ik_solver) {
-      LE_LOG_ERROR << "IK solver for " << gripper_link << " is null"
-                   << std::endl;
-      all_success = false;
-      continue;
+  // Use configured home pose if available
+  if (!home_pose_joint_position_.joint_positions.empty()) {
+    LE_LOG_INFO << "Using configured home pose with "
+                << home_pose_joint_position_.joint_positions.size() << " joints"
+                << std::endl;
+
+    // Group joints by gripper for each robot
+    for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
+      if (!ik_solver) {
+        LE_LOG_ERROR << "IK solver for " << gripper_link << " is null"
+                     << std::endl;
+        all_success = false;
+        continue;
+      }
+
+      // Get joint names from the IK solver
+      std::vector<std::string> solver_joint_names = ik_solver->GetJointNames();
+      if (solver_joint_names.empty()) {
+        LE_LOG_ERROR << "No joint names found for gripper link: "
+                     << gripper_link << std::endl;
+        all_success = false;
+        continue;
+      }
+
+      // Find matching joints from home pose configuration
+      std::vector<std::string> matching_joint_names;
+      std::vector<double> matching_positions;
+
+      for (const std::string &solver_joint : solver_joint_names) {
+        bool found = false;
+        for (const auto &[home_joint_name, home_position] :
+             home_pose_joint_position_.joint_positions) {
+          if (solver_joint == home_joint_name) {
+            matching_joint_names.push_back(home_joint_name);
+            matching_positions.push_back(home_position);
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          // Use default 0.0 for joints not specified in home pose
+          matching_joint_names.push_back(solver_joint);
+          matching_positions.push_back(0.0);
+          LE_LOG_INFO << "Joint " << solver_joint
+                      << " not found in home pose config, using default 0.0"
+                      << std::endl;
+        }
+      }
+
+      // Convert to CusJointCmd
+      CusJointCmd home_cmd =
+          Convert2CusJointCmd(matching_joint_names, matching_positions);
+
+      // Enqueue the command
+      JointCmdEnqueue(gripper_link, home_cmd);
+
+      LE_LOG_INFO << "Enqueued home pose command for " << gripper_link
+                  << " with " << matching_joint_names.size() << " joints"
+                  << std::endl;
     }
 
-    // Get joint names from the IK solver
-    std::vector<std::string> joint_names = ik_solver->GetJointNames();
-    if (joint_names.empty()) {
-      LE_LOG_ERROR << "No joint names found for gripper link: " << gripper_link
-                   << std::endl;
-      all_success = false;
-      continue;
-    }
+    // Handle gripper joint from home pose configuration
+    std::string gripper_joint_name = "gripper";
+    double home_gripper_position = 0.0; // default
 
-    // Create home position (all joints = 0)
-    std::vector<double> home_positions(joint_names.size(), 0.0);
+    // Look for gripper joint in home pose configuration
+    for (const auto &[home_joint_name, home_position] :
+         home_pose_joint_position_.joint_positions) {
+      if (home_joint_name == gripper_joint_name) {
+        home_gripper_position = home_position;
+        break;
+      }
+    }
 
     // Convert to CusJointCmd
-    CusJointCmd home_cmd = Convert2CusJointCmd(joint_names, home_positions);
+    auto gripper_home_cmd =
+        Convert2CusJointCmd(gripper_joint_name, home_gripper_position);
 
-    // Enqueue the command
-    JointCmdEnqueue(gripper_link, home_cmd);
+    // Enqueue the gripper command
+    GripperCmdEnqueue(gripper_joint_name, gripper_home_cmd);
 
-    LE_LOG_INFO << "Enqueued home pose command for " << gripper_link << " with "
-                << joint_names.size() << " joints" << std::endl;
+    LE_LOG_INFO << "Enqueued home gripper command for joint: "
+                << gripper_joint_name << " (position: " << home_gripper_position
+                << ")" << std::endl;
+
+  } else {
+    // Fallback to original behavior (all joints = 0) when no home pose is
+    // configured
+    LE_LOG_INFO << "No home pose configuration available, using default (all "
+                   "joints = 0)"
+                << std::endl;
+
+    // Iterate through all IK solvers to get joint names for each robot
+    for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
+      if (!ik_solver) {
+        LE_LOG_ERROR << "IK solver for " << gripper_link << " is null"
+                     << std::endl;
+        all_success = false;
+        continue;
+      }
+
+      // Get joint names from the IK solver
+      std::vector<std::string> joint_names = ik_solver->GetJointNames();
+      if (joint_names.empty()) {
+        LE_LOG_ERROR << "No joint names found for gripper link: "
+                     << gripper_link << std::endl;
+        all_success = false;
+        continue;
+      }
+
+      // Create home position (all joints = 0)
+      std::vector<double> home_positions(joint_names.size(), 0.0);
+
+      // Convert to CusJointCmd
+      CusJointCmd home_cmd = Convert2CusJointCmd(joint_names, home_positions);
+
+      // Enqueue the command
+      JointCmdEnqueue(gripper_link, home_cmd);
+
+      LE_LOG_INFO << "Enqueued home pose command for " << gripper_link
+                  << " with " << joint_names.size() << " joints" << std::endl;
+    }
+
+    // Also move all gripper joints to home position (closed state = 0.0)
+    // Create home position for gripper joint (closed state)
+    std::string gripper_joint_name = "gripper";
+    double home_trigger_value = 0.0;
+
+    // Convert to CusJointCmd using the same method as joystick callback
+    auto gripper_home_cmd =
+        Convert2CusJointCmd(gripper_joint_name, home_trigger_value);
+
+    // Enqueue the gripper command
+    GripperCmdEnqueue(gripper_joint_name, gripper_home_cmd);
+
+    LE_LOG_INFO << "Enqueued home gripper command for joint: "
+                << gripper_joint_name
+                << " (trigger value: " << home_trigger_value << ")"
+                << std::endl;
   }
-
-  // Also move all gripper joints to home position (closed state = 0.0)
-  // Create home position for gripper joint (closed state)
-  std::string gripper_joint_name = "gripper";
-  double home_trigger_value = 0.0;
-
-  // Convert to CusJointCmd using the same method as joystick callback
-  auto gripper_home_cmd =
-      Convert2CusJointCmd(gripper_joint_name, home_trigger_value);
-
-  // Enqueue the gripper command
-  GripperCmdEnqueue(gripper_joint_name, gripper_home_cmd);
-
-  LE_LOG_INFO << "Enqueued home gripper command for joint: "
-              << gripper_joint_name << " (trigger value: " << home_trigger_value
-              << ")" << std::endl;
 
   if (all_success) {
     LE_LOG_INFO << "Successfully enqueued home pose commands for all robots "

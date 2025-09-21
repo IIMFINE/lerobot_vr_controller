@@ -130,7 +130,6 @@ bool SoArm101Kinematics::SolveIK(const tf2::Transform &target_transform,
   }
 
   std::vector<KDL::JntArray> seed_candidates;
-  seed_candidates.reserve(8); // 预分配内存
 
   // 优先使用上次成功的解作为种子
   {
@@ -367,23 +366,6 @@ bool SoArm101Kinematics::CheckWorkspace(
 
   // 转换为KDL数据类型
   KDL::Frame target_frame = TransformToKDLFrame(target_transform);
-
-  // 计算目标位置的距离
-  double distance = std::sqrt(target_frame.p.x() * target_frame.p.x() +
-                              target_frame.p.y() * target_frame.p.y() +
-                              target_frame.p.z() * target_frame.p.z());
-
-  // 放宽工作空间限制
-  double max_reach = 0.8;  // 增加到80cm
-  double min_reach = 0.02; // 减少最小距离到2cm
-
-  if (distance > max_reach) {
-    return false; // 不打印错误信息
-  }
-
-  if (distance < min_reach) {
-    return false; // 不打印错误信息
-  }
 
   // 放宽Z坐标检查
   if (target_frame.p.z() < -0.2) { // 基座以下20cm
