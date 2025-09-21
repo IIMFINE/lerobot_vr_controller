@@ -36,7 +36,7 @@ VrRobotController::VrRobotController(std::shared_ptr<rclcpp::Node> node)
   // Initialize VR trigger to joint converter
   trigger_converter_ = std::make_unique<vr_controller::VrTriggerJointConvert>();
 
-  LE_LOG_INFO << "VrRobotController initialized" << std::endl;
+  LE_LOG_INFO << "Controller initialized" << std::endl;
 }
 
 VrRobotController::~VrRobotController() {
@@ -56,7 +56,7 @@ bool VrRobotController::Initialize(
     const std::string &motor_calibration_file_path,
     const std::string &motor_cmd_topic) {
   // Perform any additional initialization steps here
-  LE_LOG_INFO << "VrRobotController::Initialize() called" << std::endl;
+  LE_LOG_INFO << "Initialize() called" << std::endl;
 
   // Initialize YAML configuration
   yaml_config_path_ = yaml_file_path;
@@ -464,19 +464,12 @@ void VrRobotController::UpdateVrPose() {
       ts.transform.rotation.z = q.z();
       ts.transform.rotation.w = q.w();
 
-      // Enqueue result under mutex protection
-      {
-        std::unique_lock<std::mutex> lock(target_ee_pose_queue_mutex_);
-        auto &queue = target_ee_pose_queue_[gripper_link];
-        queue.emplace_back(std::move(ts));
-
-        // Limit queue size to prevent memory bloat and reduce processing load
-        while (queue.size() > 10) {
-          queue.pop_front();
-        }
-      }
-      target_ee_pose_queue_cond_.notify_one();
+      // Enqueue target VR pose
+      TargetVrPoseEnqueue(gripper_link, std::move(ts));
     } catch (const std::exception &e) {
+      LE_LOG_ERROR_T(1s) << "Exception for gripper_link: " << gripper_link
+                         << ", vr_frame: " << vr_frame
+                         << ". Error: " << e.what() << std::endl;
     }
   }
 }
@@ -494,6 +487,7 @@ void VrRobotController::JoystickCallback(
   if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
     StartRobotControl();
     MoveToHomePose();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     StopRobotControl();
     LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
                       << std::endl;
@@ -536,7 +530,7 @@ void VrRobotController::JoystickCallback(
 
         // Convert trigger value to CusJointCmd and send to control robot
         // gripper
-        LE_LOG_INFO_T(1s) << "JoystickCallback: Mapped joint: " << joint_name
+        LE_LOG_INFO_T(1s) << "Mapped joint: " << joint_name
                           << ", VR topic: " << vr_topic
                           << ", Trigger value: " << trigger_value
                           << ", Gripper position: " << gripper_position
@@ -965,6 +959,27 @@ void VrRobotController::PublishJointCmd(
 
   // Publish the joint command
   joint_state_publisher_->publish(joint_state_msg);
+}
+
+void VrRobotController::TargetVrPoseEnqueue(
+    const std::string &gripper_link, geometry_msgs::msg::TransformStamped ts) {
+
+  if (!control_robot_flag_) {
+    return;
+  }
+
+  // Enqueue result under mutex protection
+  {
+    std::unique_lock<std::mutex> lock(target_ee_pose_queue_mutex_);
+    auto &queue = target_ee_pose_queue_[gripper_link];
+    queue.emplace_back(std::move(ts));
+
+    // Limit queue size to prevent memory bloat and reduce processing load
+    while (queue.size() > 10) {
+      queue.pop_front();
+    }
+  }
+  target_ee_pose_queue_cond_.notify_one();
 }
 
 void VrRobotController::JointCmdEnqueue(const std::string &gripper_link,

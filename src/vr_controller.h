@@ -151,6 +151,10 @@ private:
                                  const JointPositionState &joint_state);
 
   // === Command Queue Functions ===
+  // Enqueue target VR pose to target_ee_pose_queue_ with mutex protection
+  void TargetVrPoseEnqueue(const std::string &gripper_link,
+                           geometry_msgs::msg::TransformStamped ts);
+
   // Enqueue joint command to joint_cmd_queue_
   void JointCmdEnqueue(const std::string &gripper_link,
                        const CusJointCmd &joint_cmd);
