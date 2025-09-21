@@ -25,6 +25,7 @@ ament_auto_add_executable(${PROJECT_NAME}_node
   src/vr_trigger_joint_convert.cpp
   src/robot_control_interface.cpp
   src/robot_communicate_interface.cpp
+  src/joint_position_filter.cpp
 )
 
 # Include header files
