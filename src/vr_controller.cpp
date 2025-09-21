@@ -492,7 +492,9 @@ void VrRobotController::JoystickCallback(
 
   // Check if buttons array has at least 6 elements (B button index)
   if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
+    StartRobotControl();
     MoveToHomePose();
+    StopRobotControl();
     LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
                       << std::endl;
     should_calibrate_ = true;
@@ -806,8 +808,8 @@ void VrRobotController::UpdateJointState(
   }
 }
 
-JointPositionState
-VrRobotController::GetLatestJointState(const std::string &gripper_link) const {
+JointPositionState VrRobotController::GetLatestJointState(
+    [[maybe_unused]] const std::string &gripper_link) const {
   // Get joint state directly from robot control interface
   if (!robot_control_interface_) {
     LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
@@ -818,29 +820,33 @@ VrRobotController::GetLatestJointState(const std::string &gripper_link) const {
   JointPositionState full_joint_state =
       robot_control_interface_->GetJointPositionState();
 
+  return full_joint_state;
+  // TODO: delete it
   // If we need to filter for specific gripper joints, we need the IK solver
-  auto ik_it = ik_solvers_.find(gripper_link);
-  if (ik_it == ik_solvers_.end() || !ik_it->second ||
-      !ik_it->second->IsInitialized()) {
-    // If no specific gripper IK solver is found, return the full joint state
-    return full_joint_state;
-  }
+  // auto ik_it = ik_solvers_.find(gripper_link);
+  // if (ik_it == ik_solvers_.end() || !ik_it->second ||
+  //     !ik_it->second->IsInitialized()) {
+  //   // If no specific gripper IK solver is found, return the full joint state
+  //   return full_joint_state;
+  // }
 
-  // Get the joint names for this specific gripper from the IK solver
-  std::vector<std::string> gripper_joint_names = ik_it->second->GetJointNames();
+  //  Get the joint names for this specific gripper from the IK solver
+  //  std::vector<std::string> gripper_joint_names =
+  //  ik_it->second->GetJointNames();
 
-  // Filter the full joint state to include only joints relevant to this gripper
-  std::vector<std::pair<std::string, double>> filtered_joints;
-  for (const auto &[joint_name, position] : full_joint_state.joint_positions) {
-    auto it = std::find(gripper_joint_names.begin(), gripper_joint_names.end(),
-                        joint_name);
-    if (it != gripper_joint_names.end()) {
-      filtered_joints.emplace_back(joint_name, position);
-    }
-  }
+  // // Filter the full joint state to include only joints relevant to this
+  // gripper std::vector<std::pair<std::string, double>> filtered_joints; for
+  // (const auto &[joint_name, position] : full_joint_state.joint_positions) {
+  //   auto it = std::find(gripper_joint_names.begin(),
+  //   gripper_joint_names.end(),
+  //                       joint_name);
+  //   if (it != gripper_joint_names.end()) {
+  //     filtered_joints.emplace_back(joint_name, position);
+  //   }
+  // }
 
   // Return filtered joint state with same timestamp
-  return JointPositionState(full_joint_state.timestamp_ns, filtered_joints);
+  // return JointPositionState(full_joint_state.timestamp_ns, filtered_joints);
 }
 
 JointPositionState VrRobotController::GetLatestJointPositionState(
@@ -1056,12 +1062,29 @@ bool VrRobotController::MoveToHomePose() {
                 << joint_names.size() << " joints" << std::endl;
   }
 
+  // Also move all gripper joints to home position (closed state = 0.0)
+  // Create home position for gripper joint (closed state)
+  std::string gripper_joint_name = "gripper";
+  double home_trigger_value = 0.0;
+
+  // Convert to CusJointCmd using the same method as joystick callback
+  auto gripper_home_cmd =
+      Convert2CusJointCmd(gripper_joint_name, home_trigger_value);
+
+  // Enqueue the gripper command
+  GripperCmdEnqueue(gripper_joint_name, gripper_home_cmd);
+
+  LE_LOG_INFO << "Enqueued home gripper command for joint: "
+              << gripper_joint_name << " (trigger value: " << home_trigger_value
+              << ")" << std::endl;
+
   if (all_success) {
-    LE_LOG_INFO << "Successfully enqueued home pose commands for all robots"
+    LE_LOG_INFO << "Successfully enqueued home pose commands for all robots "
+                   "and grippers"
                 << std::endl;
   } else {
-    LE_LOG_WARNING << "Some robots failed to enqueue home pose commands"
-                   << std::endl;
+    LE_LOG_ERROR << "Some robots failed to enqueue home pose commands"
+                 << std::endl;
   }
 
   return all_success;
@@ -1089,7 +1112,7 @@ sensor_msgs::msg::JointState VrRobotController::ConvertToRosJointState(
 std::optional<JointPositionState>
 VrRobotController::ConvertJointStateToJointPositionState(
     const sensor_msgs::msg::JointState::SharedPtr msg,
-    const std::string &gripper_link,
+    [[maybe_unused]] const std::string &gripper_link,
     const std::vector<std::string> &solver_joint_names) {
   // Check if all joints from the solver are present in the message
   bool all_joints_found = true;
