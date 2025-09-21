@@ -490,8 +490,9 @@ void VrRobotController::JoystickCallback(
     should_calibrate_ = true;
     StartRobotControl();
     MoveToHomePose();
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     StopRobotControl();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
                       << std::endl;
     LE_LOG_INFO_T(1s) << "Calibration triggered by joystick B button"
