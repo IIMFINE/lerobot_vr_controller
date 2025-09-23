@@ -2,6 +2,7 @@
 #define ROBOT_COMMUNICATE_INTERFACE_H_
 
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -151,6 +152,7 @@ private:
   std::unordered_map<std::string, int> last_motor_cmd_;
   std::string last_motor_state_;
   std::unordered_map<std::string, int> last_received_motor_positions_;
+  mutable std::shared_mutex last_received_motor_positions_mutex_;
 
   // Configuration
   std::string motor_cmd_topic_;

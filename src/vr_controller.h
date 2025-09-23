@@ -114,6 +114,9 @@ private:
                    std::vector<double> &joint_solution,
                    const std::vector<double> &seed_joints = {});
 
+  // Normalize S101 gripper transform by setting yaw rotation to 0
+  tf2::Transform NormalizeS101GripperTf(const tf2::Transform &target_transform);
+
   // Control joint with end effector poses from local queue
   void
   CalculateIk(const std::map<std::string,
@@ -216,6 +219,7 @@ private:
   // IK tolerance configurations loaded from YAML
   double position_tolerance_;
   double orientation_tolerance_;
+  double xy_max_reach_;
 
   // Joint filter configurations loaded from YAML
   double filter_alpha_; // 滤波器平滑因子
