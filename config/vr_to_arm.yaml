@@ -19,19 +19,19 @@ trigger_config:
 joint_pose:
   home_pose:
     joint_name: 
-      - wrist_roll
       - shoulder_pan
       - shoulder_lift
-      - gripper
-      - wrist_flex
       - elbow_flex
+      - wrist_flex
+      - wrist_roll
+      - gripper
     position:
-      - 0.00153400113516084
-      - 0.00613600454064336
+      - 0.0
       - -1.5370691374311618
-      - 0.015340011351608401
-      - 0.9541487060700425
-      - 1.3959410329963644
+      - 1.522
+      - 0.0
+      - 0.0
+      - 0.0
 
 joint_filter:
   alpha: 0.5
