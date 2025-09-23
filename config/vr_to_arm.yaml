@@ -6,8 +6,9 @@ vr_world_frame: world_vr
 
 # IK solver tolerances configuration
 ik_tolerances:
-  position_tolerance: 0.01    # Position tolerance in meters
-  orientation_tolerance: 0.2  # Orientation tolerance in radians
+  position_tolerance: 0.03    # Position tolerance in meters
+  orientation_tolerance: 0.02  # Orientation tolerance in radians
+  xy_max_reach: 0.4           # Maximum xy plane reach limit in meters
 
 trigger_config:
 # 1 trigger position = 0.0068 radians

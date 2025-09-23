@@ -102,11 +102,19 @@ std::string RobotCommunicateInterface::GetLastMotorState() const {
 void RobotCommunicateInterface::MotorStateCallback(
     const std_msgs::msg::String::SharedPtr msg) {
   last_motor_state_ = msg->data;
-  last_received_motor_positions_ =
-      ParseMotorPositionsFromJson(last_motor_state_);
+
+  auto motor_positions = ParseMotorPositionsFromJson(last_motor_state_);
+  size_t motor_count = motor_positions.size();
+
+  {
+    std::unique_lock<std::shared_mutex> lock(
+        last_received_motor_positions_mutex_);
+    last_received_motor_positions_ = std::move(motor_positions);
+  }
+
   LE_LOG_INFO_T(5s) << "Received motor state: " << last_motor_state_
-                    << ", parsed " << last_received_motor_positions_.size()
-                    << " motor positions" << std::endl;
+                    << ", parsed " << motor_count << " motor positions"
+                    << std::endl;
 }
 
 void RobotCommunicateInterface::Start() {
@@ -221,6 +229,8 @@ RobotCommunicateInterface::ParseMotorPositionsFromJson(
 
 std::unordered_map<std::string, int>
 RobotCommunicateInterface::GetLastReceivedMotorPositions() const {
+  std::shared_lock<std::shared_mutex> lock(
+      last_received_motor_positions_mutex_);
   return last_received_motor_positions_;
 }
 

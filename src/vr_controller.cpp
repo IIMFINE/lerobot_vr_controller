@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <tf2/utils.h>
@@ -214,14 +215,24 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
         LE_LOG_INFO << "Using default orientation_tolerance: "
                     << orientation_tolerance_ << std::endl;
       }
+
+      if (tolerance_config["xy_max_reach"]) {
+        xy_max_reach_ = tolerance_config["xy_max_reach"].as<double>();
+        LE_LOG_INFO << "Loaded xy_max_reach: " << xy_max_reach_ << std::endl;
+      } else {
+        xy_max_reach_ = 0.5; // default value
+        LE_LOG_INFO << "Using default xy_max_reach: " << xy_max_reach_
+                    << std::endl;
+      }
     } else {
       // Use default values if ik_tolerances section is missing
       position_tolerance_ = 0.01;
       orientation_tolerance_ = 0.5;
+      xy_max_reach_ = 0.5;
       LE_LOG_INFO
           << "ik_tolerances section not found, using defaults - Position: "
           << position_tolerance_ << ", Orientation: " << orientation_tolerance_
-          << std::endl;
+          << ", XY Max Reach: " << xy_max_reach_ << std::endl;
     }
 
     // Load joint filter configurations
@@ -787,6 +798,104 @@ bool VrRobotController::IkGripperTf(const std::string &gripper_link,
   }
 }
 
+tf2::Transform VrRobotController::NormalizeS101GripperTf(
+    const tf2::Transform &target_transform) {
+  // Apply xy reach limit constraint first
+  tf2::Vector3 position = target_transform.getOrigin();
+  double xy_distance =
+      std::sqrt(position.x() * position.x() + position.y() * position.y());
+
+  if (xy_distance > xy_max_reach_) {
+    // Scale down the xy position to fit within the reach limit
+    double scale_factor = xy_max_reach_ / xy_distance;
+    position.setX(position.x() * scale_factor);
+    position.setY(position.y() * scale_factor);
+
+    LE_LOG_INFO << "Limited xy reach from " << xy_distance << " to "
+                << xy_max_reach_ << std::endl;
+  }
+
+  tf2::Quaternion q = target_transform.getRotation();
+
+  const double k_eps = 1e-12;
+  const double k_pi = 3.14159265358979323846;
+
+  // 若末端位姿位于世界Z轴上(x=y=0)，-Z射线天然与世界Z轴相交
+  if (std::abs(position.x()) < 1e-9 && std::abs(position.y()) < 1e-9) {
+    q.normalize();
+    tf2::Transform out;
+    out.setOrigin(position);
+    out.setRotation(q);
+    return out;
+  }
+
+  // 目标：使工具坐标系的 -Z 方向在 XY 平面上的投影与指向原点的径向向量对齐，
+  // 从而保证沿 -Z 的射线与世界Z轴相交。
+  auto normalize_angle = [](double a) {
+    const double pi = 3.14159265358979323846;
+    const double two_pi = 2.0 * pi;
+    while (a > pi)
+      a -= two_pi;
+    while (a < -pi)
+      a += two_pi;
+    return a;
+  };
+
+  tf2::Matrix3x3 rot_m(q);
+  // 当前工具坐标系 -Z 在世界系方向
+  tf2::Vector3 neg_z = -(rot_m * tf2::Vector3(0.0, 0.0, 1.0));
+
+  // 指向世界Z轴(原点在XY平面投影)的径向单位向量
+  tf2::Vector3 radial_dir(-position.x(), -position.y(), 0.0);
+  radial_dir.normalize();
+
+  // 若 -Z 的XY投影过小(与世界Z轴近乎平行)，先绕与径向垂直的轴给予微小倾角
+  tf2::Vector3 neg_z_xy(neg_z.x(), neg_z.y(), 0.0);
+  if (neg_z_xy.length2() < 1e-16) {
+    tf2::Vector3 tilt_axis(radial_dir.y(), -radial_dir.x(), 0.0); // 与径向正交
+    if (tilt_axis.length2() > k_eps) {
+      tilt_axis.normalize();
+      const double tilt_angle = 0.08726646259971647; // 5度
+      tf2::Quaternion q_tilt;
+      q_tilt.setRotation(tilt_axis, tilt_angle);
+      q = q_tilt * q; // 世界系左乘
+      q.normalize();
+      rot_m.setRotation(q);
+      neg_z = -(rot_m * tf2::Vector3(0.0, 0.0, 1.0));
+      neg_z_xy = tf2::Vector3(neg_z.x(), neg_z.y(), 0.0);
+    }
+  }
+
+  // 绕世界Z轴的偏航校正，使 -Z 的XY投影与径向向量对齐(指向原点)
+  double phi_dir = std::atan2(neg_z_xy.y(), neg_z_xy.x());
+  double phi_radial = std::atan2(radial_dir.y(), radial_dir.x());
+  double yaw_delta = normalize_angle(phi_radial - phi_dir);
+
+  tf2::Quaternion q_yaw;
+  q_yaw.setRPY(0.0, 0.0, yaw_delta);
+  q = q_yaw * q; // 世界系左乘
+  q.normalize();
+
+  // 再次校验对齐方向，若仍反向(背离原点)，再绕世界Z轴翻转180度
+  rot_m.setRotation(q);
+  neg_z = -(rot_m * tf2::Vector3(0.0, 0.0, 1.0));
+  tf2::Vector3 neg_z_xy2(neg_z.x(), neg_z.y(), 0.0);
+  if (neg_z_xy2.length2() > k_eps) {
+    neg_z_xy2.normalize();
+    if (neg_z_xy2.dot(radial_dir) < 0.0) {
+      tf2::Quaternion q_flip;
+      q_flip.setRPY(0.0, 0.0, k_pi);
+      q = q_flip * q;
+      q.normalize();
+    }
+  }
+
+  tf2::Transform result;
+  result.setOrigin(position);
+  result.setRotation(q);
+  return result;
+}
+
 void VrRobotController::EeToJointWorkerLoop() {
   while (ee_to_joint_worker_running_) {
     // Wait until there's work or shutdown
@@ -870,9 +979,22 @@ void VrRobotController::CalculateIk(
       // Prepare for IK solution
       std::vector<double> joint_solution;
 
+      auto calibration_target_transform =
+          NormalizeS101GripperTf(target_transform);
+
+      // TODO: delete it Publish calibration_target_transform to TF
+      {
+        geometry_msgs::msg::TransformStamped test_gripper_tf;
+        test_gripper_tf.header.stamp = node_->now();
+        test_gripper_tf.header.frame_id = gripper_world_frame_;
+        test_gripper_tf.child_frame_id = "test_gripper";
+        test_gripper_tf.transform = tf2::toMsg(calibration_target_transform);
+        tf_broadcaster_->sendTransform(test_gripper_tf);
+      }
+
       // Call IK solver
-      if (!IkGripperTf(gripper_link, target_transform, joint_solution,
-                       seed_joints)) {
+      if (!IkGripperTf(gripper_link, calibration_target_transform,
+                       joint_solution, seed_joints)) {
         LE_LOG_ERROR_T(5s) << "IK solving failed for gripper link: "
                            << gripper_link << " at queue index: " << i
                            << std::endl;
@@ -905,6 +1027,8 @@ void VrRobotController::CalculateIk(
         // No filters for this gripper, use original solution
         filtered_joint_solution = joint_solution;
       }
+
+      filtered_joint_solution = joint_solution;
 
       // Update seed for next iteration (use filtered values for smoother
       // trajectory)
@@ -956,32 +1080,6 @@ JointPositionState VrRobotController::GetLatestJointState(
       robot_control_interface_->GetJointPositionState();
 
   return full_joint_state;
-  // TODO: delete it
-  // If we need to filter for specific gripper joints, we need the IK solver
-  // auto ik_it = ik_solvers_.find(gripper_link);
-  // if (ik_it == ik_solvers_.end() || !ik_it->second ||
-  //     !ik_it->second->IsInitialized()) {
-  //   // If no specific gripper IK solver is found, return the full joint state
-  //   return full_joint_state;
-  // }
-
-  //  Get the joint names for this specific gripper from the IK solver
-  //  std::vector<std::string> gripper_joint_names =
-  //  ik_it->second->GetJointNames();
-
-  // // Filter the full joint state to include only joints relevant to this
-  // gripper std::vector<std::pair<std::string, double>> filtered_joints; for
-  // (const auto &[joint_name, position] : full_joint_state.joint_positions) {
-  //   auto it = std::find(gripper_joint_names.begin(),
-  //   gripper_joint_names.end(),
-  //                       joint_name);
-  //   if (it != gripper_joint_names.end()) {
-  //     filtered_joints.emplace_back(joint_name, position);
-  //   }
-  // }
-
-  // Return filtered joint state with same timestamp
-  // return JointPositionState(full_joint_state.timestamp_ns, filtered_joints);
 }
 
 JointPositionState VrRobotController::GetLatestJointPositionState(
