@@ -266,31 +266,75 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
                   << filter_alpha_ << std::endl;
     }
 
-    // Configure VR trigger to joint converter
-    double trigger_scale = 0.0068; // Default value
-    // Parse trigger_config section for joint mappings
-    if (config["trigger_config"]) {
-      auto trigger_config = config["trigger_config"];
+    // Load axes fine tune configurations (supports top-level or joy_config)
+    YAML::Node axes_config;
+    if (config["joy_config"] && config["joy_config"]["axes_config"]) {
+      axes_config = config["joy_config"]["axes_config"];
+    }
 
-      // Update trigger scale if specified in trigger_config
-      if (trigger_config["trigger_to_gripper_scale"]) {
-        trigger_scale = trigger_config["trigger_to_gripper_scale"].as<double>();
-        LE_LOG_INFO << "Updated trigger_to_gripper_scale from trigger_config: "
-                    << trigger_scale << std::endl;
+    if (axes_config) {
+
+      if (axes_config["z_advance_scale"]) {
+        z_advance_scale_ = axes_config["z_advance_scale"].as<double>();
+        LE_LOG_INFO << "Loaded z_advance_scale: " << z_advance_scale_
+                    << std::endl;
+      } else {
+        z_advance_scale_ = 0.01;
+        LE_LOG_INFO << "Using default z_advance_scale: " << z_advance_scale_
+                    << std::endl;
       }
 
-      // Parse joint_mappings
-      if (trigger_config["joint_mappings"]) {
-        auto joint_mappings = trigger_config["joint_mappings"];
-        for (auto it = joint_mappings.begin(); it != joint_mappings.end();
-             ++it) {
-          std::string joint_name = it->first.as<std::string>();
-          std::string vr_topic = it->second.as<std::string>();
+      if (axes_config["z_clockwise_rotate_scale"]) {
+        z_clockwise_rotate_scale_ =
+            axes_config["z_clockwise_rotate_scale"].as<double>();
+        LE_LOG_INFO << "Loaded z_clockwise_rotate_scale: "
+                    << z_clockwise_rotate_scale_ << std::endl;
+      } else {
+        z_clockwise_rotate_scale_ = 0.08;
+        LE_LOG_INFO << "Using default z_clockwise_rotate_scale: "
+                    << z_clockwise_rotate_scale_ << std::endl;
+      }
+    } else {
+      z_advance_scale_ = 0.01;
+      z_clockwise_rotate_scale_ = 0.08;
+      LE_LOG_INFO << "axes_config section not found, using defaults - "
+                  << "z_advance_scale: " << z_advance_scale_
+                  << ", z_clockwise_rotate_scale: " << z_clockwise_rotate_scale_
+                  << std::endl;
+    }
 
-          joint_to_vr_topic_map_[joint_name] = vr_topic;
+    // Configure VR trigger to joint converter
+    double trigger_scale = 0.0068; // Default value
+    // Parse joy_config section for trigger configurations and joint mappings
+    if (config["joy_config"]) {
+      auto joy_config = config["joy_config"];
 
-          LE_LOG_INFO << "Loaded joint mapping: " << joint_name << " -> "
-                      << vr_topic << std::endl;
+      // Parse trigger_config section within joy_config
+      if (joy_config["trigger_config"]) {
+        auto trigger_config = joy_config["trigger_config"];
+
+        // Update trigger scale if specified in trigger_config
+        if (trigger_config["trigger_to_gripper_scale"]) {
+          trigger_scale =
+              trigger_config["trigger_to_gripper_scale"].as<double>();
+          LE_LOG_INFO << "Updated trigger_to_gripper_scale from "
+                         "joy_config/trigger_config: "
+                      << trigger_scale << std::endl;
+        }
+
+        // Parse joint_mappings
+        if (trigger_config["joint_mappings"]) {
+          auto joint_mappings = trigger_config["joint_mappings"];
+          for (auto it = joint_mappings.begin(); it != joint_mappings.end();
+               ++it) {
+            std::string joint_name = it->first.as<std::string>();
+            std::string vr_topic = it->second.as<std::string>();
+
+            joint_to_vr_topic_map_[joint_name] = vr_topic;
+
+            LE_LOG_INFO << "Loaded joint mapping: " << joint_name << " -> "
+                        << vr_topic << std::endl;
+          }
         }
       }
     }
@@ -546,6 +590,10 @@ void VrRobotController::JoystickCallback(
   constexpr const int kSideTriggerButton = 1;
   constexpr const int kBButton = 5;
 
+  // VR controller axes indices
+  constexpr const int kZClockwiseRotateAxis = 2;
+  constexpr const int kZAdvanceAxis = 3;
+
   constexpr const int kSideTriggerThreshold = 200;
 
   // Check if buttons array has at least 6 elements (B button index)
@@ -556,6 +604,8 @@ void VrRobotController::JoystickCallback(
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     StopRobotControl();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    ee_pose_fine_tune_.z_advance_ = 0.0;
+    ee_pose_fine_tune_.z_clockwise_rotate_ = 0.0;
     LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
                       << std::endl;
     LE_LOG_INFO_T(1s) << "Calibration triggered by joystick B button"
@@ -604,6 +654,23 @@ void VrRobotController::JoystickCallback(
         GripperCmdEnqueue(gripper_cmd);
       }
     }
+  }
+
+  // Handle axes input for EE pose fine tune
+  if (msg->axes.size() > kZAdvanceAxis) {
+    std::unique_lock<std::shared_mutex> lock(ee_pose_fine_tune_mutex_);
+
+    // axes[kZAdvanceAxis] -> z_advance (累积增加/减少)
+    ee_pose_fine_tune_.z_advance_ +=
+        msg->axes[kZAdvanceAxis] * z_advance_scale_;
+
+    // axes[kZClockwiseRotateAxis] -> z_clockwise_rotate (累积增加/减少)
+  ee_pose_fine_tune_.z_clockwise_rotate_ +=
+      msg->axes[kZClockwiseRotateAxis] * z_clockwise_rotate_scale_;
+
+  LE_LOG_INFO_T(2s) << "EE pose fine tune - Z advance: "
+                    << ee_pose_fine_tune_.z_advance_ << ", Z clockwise rotate: "
+                    << ee_pose_fine_tune_.z_clockwise_rotate_ << std::endl;
   }
 }
 
@@ -826,6 +893,49 @@ tf2::Transform VrRobotController::NormalizeS101GripperTf(
   return result;
 }
 
+tf2::Transform VrRobotController::ApplyTargetTfFineTune(
+    const tf2::Transform &target_transform) const {
+  tf2::Transform result = target_transform;
+
+  // Get fine tune values with thread-safe access
+  double z_advance;
+  double z_clockwise_rotate;
+  {
+    std::shared_lock<std::shared_mutex> lock(ee_pose_fine_tune_mutex_);
+    z_advance = ee_pose_fine_tune_.z_advance_;
+    z_clockwise_rotate = ee_pose_fine_tune_.z_clockwise_rotate_;
+  }
+
+  // Skip processing if no fine tuning is needed
+  if (std::abs(z_advance) < 1e-9 && std::abs(z_clockwise_rotate) < 1e-9) {
+    return result;
+  }
+
+  // Apply z-axis clockwise rotation: rotate around the transform's local z-axis
+  if (std::abs(z_clockwise_rotate) >= 1e-9) {
+    // Create rotation quaternion around local z-axis (clockwise rotation means
+    // negative angle)
+    tf2::Quaternion z_rotation;
+    z_rotation.setRPY(0.0, 0.0, -z_clockwise_rotate);
+
+    // Apply rotation in the transform's local coordinate system
+    tf2::Quaternion current_rotation = result.getRotation();
+    tf2::Quaternion new_rotation = current_rotation * z_rotation;
+    new_rotation.normalize();
+    result.setRotation(new_rotation);
+  }
+
+  // Apply z-axis advance: move along the transform's local z-axis after
+  // rotation
+  if (std::abs(z_advance) >= 1e-9) {
+    tf2::Vector3 local_z_axis = result.getBasis() * tf2::Vector3(0.0, 0.0, 1.0);
+    tf2::Vector3 new_origin = result.getOrigin() + local_z_axis * z_advance;
+    result.setOrigin(new_origin);
+  }
+
+  return result;
+}
+
 void VrRobotController::EeToJointWorkerLoop() {
   while (ee_to_joint_worker_running_) {
     // Wait until there's work or shutdown
@@ -850,12 +960,12 @@ void VrRobotController::EeToJointWorkerLoop() {
 
     // Process local_queue and convert EE targets to joint states
     if (!local_queue.empty()) {
-      CalculateIk(local_queue);
+      ProcessEePose(local_queue);
     }
   }
 }
 
-void VrRobotController::CalculateIk(
+void VrRobotController::ProcessEePose(
     const std::deque<geometry_msgs::msg::TransformStamped> &local_queue) {
   if (local_queue.empty())
     return;
@@ -897,22 +1007,23 @@ void VrRobotController::CalculateIk(
     // Prepare for IK solution
     std::vector<double> joint_solution;
 
-    auto calibration_target_transform =
-        NormalizeS101GripperTf(target_transform);
+    auto crrected_target_transform = NormalizeS101GripperTf(target_transform);
 
-    // TODO: delete it Publish calibration_target_transform to TF
+    crrected_target_transform =
+        ApplyTargetTfFineTune(crrected_target_transform);
+
+    // TODO: delete it Publish crrected_target_transform to TF
     {
       geometry_msgs::msg::TransformStamped test_gripper_tf;
       test_gripper_tf.header.stamp = node_->now();
       test_gripper_tf.header.frame_id = gripper_world_frame_;
       test_gripper_tf.child_frame_id = "test_gripper";
-      test_gripper_tf.transform = tf2::toMsg(calibration_target_transform);
+      test_gripper_tf.transform = tf2::toMsg(crrected_target_transform);
       tf_broadcaster_->sendTransform(test_gripper_tf);
     }
 
     // Call IK solver
-    if (!IkGripperTf(calibration_target_transform, joint_solution,
-                     seed_joints)) {
+    if (!IkGripperTf(crrected_target_transform, joint_solution, seed_joints)) {
       LE_LOG_ERROR_T(5s) << "IK solving failed at queue index: " << i
                          << std::endl;
       continue;
