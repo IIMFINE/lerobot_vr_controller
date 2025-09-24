@@ -311,16 +311,20 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
                   << std::endl;
     }
 
-    // Iterate through all key-value pairs in vr_to_arm_tf
-    for (auto it = tf_config.begin(); it != tf_config.end(); ++it) {
-      std::string gripper_link = it->first.as<std::string>();
-      std::string vr_link = it->second.as<std::string>();
-
-      gripper_link_to_vr_map_[gripper_link] = vr_link;
-
-      LE_LOG_INFO << "Loaded mapping: " << vr_link << " -> " << gripper_link
-                  << std::endl;
+    // Load the single gripper link mapping from vr_to_arm_tf
+    // Expect only one mapping in the configuration
+    if (tf_config.size() != 1) {
+      LE_LOG_ERROR << "Expected exactly one mapping in vr_to_arm_tf, got "
+                   << tf_config.size() << std::endl;
+      return false;
     }
+
+    auto it = tf_config.begin();
+    tip_link_ = it->first.as<std::string>();
+    vr_frame_ = it->second.as<std::string>();
+
+    LE_LOG_INFO << "Loaded single mapping: " << vr_frame_ << " -> " << tip_link_
+                << std::endl;
 
     // Parse home_pose configuration
     if (config["joint_pose"] && config["joint_pose"]["home_pose"]) {
@@ -385,77 +389,69 @@ void VrRobotController::CalibrateVr2GripperTf() {
 
   {
     std::unique_lock<std::shared_mutex> lock(vr_base_link_dummy_tf_mutex_);
-    vr_base_link_dummy_tf_.clear();
+    vr_base_link_dummy_tf_ = geometry_msgs::msg::TransformStamped();
   }
 
-  for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
-    try {
-      // Check if both frames exist in TF tree
-      // Get transform from gripper world frame to gripper_link
-      geometry_msgs::msg::TransformStamped world_to_gripper;
-      world_to_gripper = tf_buffer_->lookupTransform(
-          gripper_world_frame_, gripper_link, tf2::TimePointZero);
+  try {
+    // Check if both frames exist in TF tree
+    // Get transform from gripper world frame to tip_link_
+    geometry_msgs::msg::TransformStamped world_to_gripper;
+    world_to_gripper = tf_buffer_->lookupTransform(gripper_world_frame_,
+                                                   tip_link_, tf2::TimePointZero);
 
-      // Get transform from VR world frame to vr_frame
-      geometry_msgs::msg::TransformStamped world_to_vr;
-      world_to_vr = tf_buffer_->lookupTransform(vr_world_frame_, vr_frame,
-                                                tf2::TimePointZero);
+    // Get transform from VR world frame to vr_frame_
+    geometry_msgs::msg::TransformStamped world_to_vr;
+    world_to_vr = tf_buffer_->lookupTransform(vr_world_frame_, vr_frame_,
+                                              tf2::TimePointZero);
 
-      // Convert to tf2 transforms for easier computation
-      tf2::Transform tf_world_to_gripper;
-      tf2::Transform tf_world_to_vr;
+    // Convert to tf2 transforms for easier computation
+    tf2::Transform tf_world_to_gripper;
+    tf2::Transform tf_world_to_vr;
 
-      tf2::fromMsg(world_to_gripper.transform, tf_world_to_gripper);
-      tf2::fromMsg(world_to_vr.transform, tf_world_to_vr);
+    tf2::fromMsg(world_to_gripper.transform, tf_world_to_gripper);
+    tf2::fromMsg(world_to_vr.transform, tf_world_to_vr);
 
-      // Compute and store rotation from gripper to VR for future use
-      tf2::Quaternion gripper_q = tf_world_to_gripper.getRotation();
-      tf2::Quaternion vr_q = tf_world_to_vr.getRotation();
-      tf2::Quaternion vr_to_gripper_q = vr_q.inverse() * gripper_q;
-      vr_wrist_to_gripper_rot_[gripper_link] = vr_to_gripper_q;
+    // Compute and store rotation from gripper to VR for future use
+    tf2::Quaternion gripper_q = tf_world_to_gripper.getRotation();
+    tf2::Quaternion vr_q = tf_world_to_vr.getRotation();
+    tf2::Quaternion vr_to_gripper_q = vr_q.inverse() * gripper_q;
+    vr_wrist_to_gripper_rot_ = vr_to_gripper_q;
 
-      // Link: vr_world_frame -> vr_base_link_dummy -> vr_gripper_dummy
-      // To tf to real arm is: vr_base_link_dummy -> vr_gripper_dummy
-      tf2::Transform tf_vr_gripper_dummy =
-          tf2::Transform(gripper_q, tf_world_to_vr.getOrigin());
+    // Link: vr_world_frame -> vr_base_link_dummy -> vr_gripper_dummy
+    // To tf to real arm is: vr_base_link_dummy -> vr_gripper_dummy
+    tf2::Transform tf_vr_gripper_dummy =
+        tf2::Transform(gripper_q, tf_world_to_vr.getOrigin());
 
-      tf2::Transform vr_base_link_dummy =
-          tf_vr_gripper_dummy * tf_world_to_gripper.inverse();
+    tf2::Transform vr_base_link_dummy =
+        tf_vr_gripper_dummy * tf_world_to_gripper.inverse();
 
-      // Convert back to TransformStamped message
-      geometry_msgs::msg::TransformStamped vr_base_link_dummy_msg;
-      vr_base_link_dummy_msg.header.frame_id = vr_frame;
-      vr_base_link_dummy_msg.child_frame_id = vr_frame + kVrBaseLinkDummySuffix;
-      vr_base_link_dummy_msg.header.stamp = node_->now();
-      vr_base_link_dummy_msg.transform = tf2::toMsg(vr_base_link_dummy);
+    // Convert back to TransformStamped message
+    geometry_msgs::msg::TransformStamped vr_base_link_dummy_msg;
+    vr_base_link_dummy_msg.header.frame_id = vr_frame_;
+    vr_base_link_dummy_msg.child_frame_id = vr_frame_ + kVrBaseLinkDummySuffix;
+    vr_base_link_dummy_msg.header.stamp = node_->now();
+    vr_base_link_dummy_msg.transform = tf2::toMsg(vr_base_link_dummy);
 
-      // Store the transformation with exclusive lock
-      {
-        std::unique_lock<std::shared_mutex> lock(vr_base_link_dummy_tf_mutex_);
-        vr_base_link_dummy_tf_[gripper_link] = vr_base_link_dummy_msg;
-      }
-
-      calibrated_flag_ = true;
-      should_calibrate_ = false;
-
-      LE_LOG_INFO << "Successfully computed and published transform from "
-                  << vr_frame << " to " << gripper_link << std::endl;
-
-    } catch (const tf2::TransformException &ex) {
-      LE_LOG_ERROR_T(1s) << "Failed to get transform for gripper_link: "
-                         << gripper_link << ", vr_frame: " << vr_frame
-                         << ". Error: " << ex.what() << std::endl;
+    // Store the transformation with exclusive lock
+    {
+      std::unique_lock<std::shared_mutex> lock(vr_base_link_dummy_tf_mutex_);
+      vr_base_link_dummy_tf_ = vr_base_link_dummy_msg;
     }
-  }
 
-  if (!vr_base_link_dummy_tf_.empty()) {
-    LE_LOG_INFO << "Successfully computed " << vr_base_link_dummy_tf_.size()
-                << " VR to gripper transformations" << std::endl;
+    calibrated_flag_ = true;
+    should_calibrate_ = false;
+
+    LE_LOG_INFO << "Successfully computed and published transform from "
+                << vr_frame_ << " to " << tip_link_ << std::endl;
+
+  } catch (const tf2::TransformException &ex) {
+    LE_LOG_ERROR_T(1s) << "Failed to get transform for tip_link: " << tip_link_
+                       << ", vr_frame: " << vr_frame_ << ". Error: " << ex.what()
+                       << std::endl;
   }
 }
 
-tf2::Transform VrRobotController::Vr2GripperTf(const std::string &gripper_link,
-                                               const std::string &vr_frame) {
+tf2::Transform VrRobotController::Vr2GripperTf(const std::string &vr_frame) {
   // Get current VR transform
   geometry_msgs::msg::TransformStamped vr_transform;
   vr_transform = tf_buffer_->lookupTransform(vr_world_frame_, vr_frame,
@@ -465,12 +461,7 @@ tf2::Transform VrRobotController::Vr2GripperTf(const std::string &gripper_link,
   geometry_msgs::msg::TransformStamped calibration_transform;
   {
     std::shared_lock<std::shared_mutex> lock(vr_base_link_dummy_tf_mutex_);
-    auto it = vr_base_link_dummy_tf_.find(gripper_link);
-    if (it == vr_base_link_dummy_tf_.end()) {
-      throw std::runtime_error("Calibration data not found for gripper link: " +
-                               gripper_link);
-    }
-    calibration_transform = it->second;
+    calibration_transform = vr_base_link_dummy_tf_;
   }
 
   // Apply the stored calibration transformation using tf2
@@ -481,7 +472,7 @@ tf2::Transform VrRobotController::Vr2GripperTf(const std::string &gripper_link,
   tf2::fromMsg(calibration_transform.transform, tf_vr_base_link_dummy);
 
   tf2::Quaternion tf_vr_rot_to_gripper =
-      tf_vr_current.getRotation() * vr_wrist_to_gripper_rot_[gripper_link];
+      tf_vr_current.getRotation() * vr_wrist_to_gripper_rot_;
 
   tf2::Transform tf_vr_rot_correction =
       tf2::Transform(tf_vr_rot_to_gripper, tf_vr_current.getOrigin());
@@ -497,63 +488,54 @@ void VrRobotController::Vr2GripperTfPublish() {
     return;
   }
 
-  for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
-    try {
-      // Calculate the transformation using the new Vr2GripperTf function
-      tf2::Transform tf_vr_to_gripper_cal =
-          Vr2GripperTf(gripper_link, vr_frame);
+  try {
+    // Calculate the transformation using the new Vr2GripperTf function
+    tf2::Transform tf_vr_to_gripper_cal = Vr2GripperTf(vr_frame_);
 
-      // Create child frame name with gripper cal suffix
-      std::string child_frame = gripper_link + kGripperCalSuffix;
+    // Create child frame name with gripper cal suffix
+    std::string child_frame = tip_link_ + kGripperCalSuffix;
 
-      // Convert back to geometry_msgs and publish
-      geometry_msgs::msg::TransformStamped calibrated_transform;
-      calibrated_transform.header.stamp = node_->now();
-      calibrated_transform.header.frame_id = gripper_world_frame_;
-      calibrated_transform.child_frame_id = child_frame;
-      calibrated_transform.transform = tf2::toMsg(tf_vr_to_gripper_cal);
+    // Convert back to geometry_msgs and publish
+    geometry_msgs::msg::TransformStamped calibrated_transform;
+    calibrated_transform.header.stamp = node_->now();
+    calibrated_transform.header.frame_id = gripper_world_frame_;
+    calibrated_transform.child_frame_id = child_frame;
+    calibrated_transform.transform = tf2::toMsg(tf_vr_to_gripper_cal);
 
-      tf_broadcaster_->sendTransform(calibrated_transform);
-    } catch (const std::exception &ex) {
-      // Silently continue if transform not available
-      // 减少频繁的警告日志输出
-    }
+    tf_broadcaster_->sendTransform(calibrated_transform);
+  } catch (const std::exception &ex) {
+    // Silently continue if transform not available
+    // 减少频繁的警告日志输出
   }
 }
 
 void VrRobotController::UpdateVrPose() {
-  // Iterate all mapped gripper links and VR frames
-  for (const auto &pair : gripper_link_to_vr_map_) {
-    const std::string &gripper_link = pair.first;
-    const std::string &vr_frame = pair.second;
+  try {
+    // Compute transform from VR to gripper target in gripper world frame
+    tf2::Transform tf = Vr2GripperTf(vr_frame_);
 
-    try {
-      // Compute transform from VR to gripper target in gripper world frame
-      tf2::Transform tf = Vr2GripperTf(gripper_link, vr_frame);
+    geometry_msgs::msg::TransformStamped ts;
+    ts.header.stamp = node_->now();
+    ts.header.frame_id = gripper_world_frame_;
+    ts.child_frame_id = tip_link_; // target EE pose for this gripper
 
-      geometry_msgs::msg::TransformStamped ts;
-      ts.header.stamp = node_->now();
-      ts.header.frame_id = gripper_world_frame_;
-      ts.child_frame_id = gripper_link; // target EE pose for this gripper
+    const tf2::Vector3 &t = tf.getOrigin();
+    ts.transform.translation.x = t.x();
+    ts.transform.translation.y = t.y();
+    ts.transform.translation.z = t.z();
 
-      const tf2::Vector3 &t = tf.getOrigin();
-      ts.transform.translation.x = t.x();
-      ts.transform.translation.y = t.y();
-      ts.transform.translation.z = t.z();
+    tf2::Quaternion q = tf.getRotation();
+    ts.transform.rotation.x = q.x();
+    ts.transform.rotation.y = q.y();
+    ts.transform.rotation.z = q.z();
+    ts.transform.rotation.w = q.w();
 
-      tf2::Quaternion q = tf.getRotation();
-      ts.transform.rotation.x = q.x();
-      ts.transform.rotation.y = q.y();
-      ts.transform.rotation.z = q.z();
-      ts.transform.rotation.w = q.w();
-
-      // Enqueue target VR pose
-      TargetVrPoseEnqueue(gripper_link, std::move(ts));
-    } catch (const std::exception &e) {
-      LE_LOG_ERROR_T(1s) << "Exception for gripper_link: " << gripper_link
-                         << ", vr_frame: " << vr_frame
-                         << ". Error: " << e.what() << std::endl;
-    }
+    // Enqueue target VR pose
+    TargetVrPoseEnqueue(std::move(ts));
+  } catch (const std::exception &e) {
+    LE_LOG_ERROR_T(1s) << "Exception for tip_link: " << tip_link_
+                       << ", vr_frame: " << vr_frame_ << ". Error: " << e.what()
+                       << std::endl;
   }
 }
 
@@ -609,8 +591,7 @@ void VrRobotController::JoystickCallback(
         }
 
         // Convert trigger value to gripper joint position
-        auto gripper_position =
-            ConvertTriggerJointPosition(joint_name, trigger_value);
+        auto gripper_position = ConvertTriggerJointPosition(trigger_value);
 
         // Convert trigger value to CusJointCmd and send to control robot
         // gripper
@@ -620,7 +601,7 @@ void VrRobotController::JoystickCallback(
                           << ", Gripper position: " << gripper_position
                           << std::endl;
         auto gripper_cmd = Convert2CusJointCmd(joint_name, trigger_value);
-        GripperCmdEnqueue(joint_name, gripper_cmd);
+        GripperCmdEnqueue(gripper_cmd);
       }
     }
   }
@@ -647,75 +628,41 @@ bool VrRobotController::InitIkSolver() {
   LE_LOG_INFO << "Successfully loaded URDF file: " << urdf_file_path_
               << std::endl;
 
-  // Clear any existing solvers before initializing new ones
-  ik_solvers_.clear();
+  // Initialize single IK solver
+  ik_solver_ = std::make_unique<SoArm101Kinematics>();
 
-  // Initialize one IK solver for each gripper link
-  size_t gripper_count = gripper_link_to_vr_map_.size();
-  LE_LOG_INFO << "Initializing " << gripper_count << " IK solvers for "
-              << gripper_count << " grippers" << std::endl;
-
-  for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
-    auto ik_solver = std::make_unique<SoArm101Kinematics>();
-
-    try {
-      // Use gripper_world_frame_ as base_link and gripper_link as tip_link
-      if (!ik_solver->Initialize(urdf_string, gripper_world_frame_,
-                                 gripper_link)) {
-        LE_LOG_ERROR << "Failed to initialize IK solver for gripper link: "
-                     << gripper_link << std::endl;
-        // Clear all solvers on failure
-        ik_solvers_.clear();
-        return false;
-      }
-
-      // Store the initialized solver
-      ik_solvers_[gripper_link] = std::move(ik_solver);
-
-      // Set the tolerances loaded from YAML configuration
-      ik_solvers_[gripper_link]->SetTolerances(position_tolerance_,
-                                               orientation_tolerance_);
-
-      LE_LOG_INFO << "IK solver " << ik_solvers_.size() << "/" << gripper_count
-                  << " initialized successfully for gripper link: "
-                  << gripper_link << " with "
-                  << ik_solvers_[gripper_link]->GetNumJoints()
-                  << " joints (relaxed precision)" << std::endl;
-
-    } catch (const std::exception &e) {
-      LE_LOG_ERROR
-          << "Exception during IK solver initialization for gripper link "
-          << gripper_link << ": " << e.what() << std::endl;
-      // Clear all solvers on failure
-      ik_solvers_.clear();
+  try {
+    // Use gripper_world_frame_ as base_link and tip_link_ as tip_link
+    if (!ik_solver_->Initialize(urdf_string, gripper_world_frame_, tip_link_)) {
+      LE_LOG_ERROR << "Failed to initialize IK solver for tip link: "
+                   << tip_link_ << std::endl;
+      ik_solver_.reset();
       return false;
     }
-  }
 
-  if (ik_solvers_.empty()) {
-    LE_LOG_ERROR << "No gripper links found in configuration" << std::endl;
+    // Set the tolerances loaded from YAML configuration
+    ik_solver_->SetTolerances(position_tolerance_, orientation_tolerance_);
+
+    LE_LOG_INFO << "IK solver initialized successfully for tip link: "
+                << tip_link_ << " with " << ik_solver_->GetNumJoints()
+                << " joints (relaxed precision)" << std::endl;
+
+  } catch (const std::exception &e) {
+    LE_LOG_ERROR << "Exception during IK solver initialization for tip link "
+                 << tip_link_ << ": " << e.what() << std::endl;
+    ik_solver_.reset();
     return false;
   }
 
-  // Verify we have exactly the same number of IK solvers as grippers
-  if (ik_solvers_.size() != gripper_link_to_vr_map_.size()) {
-    LE_LOG_ERROR << "Mismatch: Expected " << gripper_link_to_vr_map_.size()
-                 << " IK solvers but got " << ik_solvers_.size() << std::endl;
-    ik_solvers_.clear();
+  if (!ik_solver_) {
+    LE_LOG_ERROR << "Failed to initialize IK solver" << std::endl;
     return false;
   }
 
-  LE_LOG_INFO << "Successfully initialized " << ik_solvers_.size()
-              << " IK solvers for " << gripper_link_to_vr_map_.size()
-              << " grippers" << std::endl;
+  LE_LOG_INFO << "Successfully initialized IK solver for tip link: "
+              << tip_link_ << std::endl;
 
-  // Log all initialized gripper-solver pairs
-  for (const auto &[gripper_link, solver] : ik_solvers_) {
-    LE_LOG_INFO << "Gripper '" << gripper_link << "' -> IK solver with "
-                << solver->GetNumJoints() << " joints" << std::endl;
-  }
-
-  // Initialize joint position filters after IK solvers are ready
+  // Initialize joint position filters after IK solver is ready
   InitJointFilters();
 
   return true;
@@ -728,57 +675,41 @@ void VrRobotController::InitJointFilters() {
   // Use configured filter alpha value
   constexpr double kDefaultInitialValue = 0.0;
 
-  // Initialize filters for each gripper's IK-controlled joints
+  // Initialize filters for IK-controlled joints
   // Note: These filters are only used for joints controlled through IK solver,
   // not for trigger-controlled joints (gripper joints)
-  for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
-    if (!ik_solver || !ik_solver->IsInitialized()) {
-      continue;
-    }
-
-    // Get joint names for this gripper (IK-controlled joints only)
-    const auto joint_names = ik_solver->GetJointNames();
-
-    // Initialize filters for each IK-controlled joint
-    auto &gripper_filters = joint_filters_[gripper_link];
-    for (const auto &joint_name : joint_names) {
-      gripper_filters[joint_name] = std::make_unique<JointPositionFilter>(
-          filter_alpha_, kDefaultInitialValue);
-    }
-
-    LE_LOG_INFO << "Initialized " << joint_names.size()
-                << " joint filters (alpha=" << filter_alpha_
-                << ") for IK-controlled joints of gripper: " << gripper_link
-                << std::endl;
+  if (!ik_solver_ || !ik_solver_->IsInitialized()) {
+    LE_LOG_ERROR << "IK solver not initialized, cannot create joint filters"
+                 << std::endl;
+    return;
   }
 
-  LE_LOG_INFO << "Successfully initialized joint position filters for "
-              << joint_filters_.size()
-              << " grippers (IK-controlled joints only)" << std::endl;
+  // Get joint names for IK-controlled joints only
+  const auto joint_names = ik_solver_->GetJointNames();
+
+  // Initialize filters for each IK-controlled joint
+  for (const auto &joint_name : joint_names) {
+    joint_filters_[joint_name] = std::make_unique<JointPositionFilter>(
+        filter_alpha_, kDefaultInitialValue);
+  }
+
+  LE_LOG_INFO << "Initialized " << joint_names.size()
+              << " joint filters (alpha=" << filter_alpha_
+              << ") for IK-controlled joints" << std::endl;
 }
 
-bool VrRobotController::IkGripperTf(const std::string &gripper_link,
-                                    const tf2::Transform &target_transform,
+bool VrRobotController::IkGripperTf(const tf2::Transform &target_transform,
                                     std::vector<double> &joint_solution,
                                     const std::vector<double> &seed_joints) {
-  // Find the IK solver for this gripper link
-  auto it = ik_solvers_.find(gripper_link);
-  if (it == ik_solvers_.end()) {
-    LE_LOG_ERROR << "IK solver not found for gripper link: " << gripper_link
+  if (!ik_solver_ || !ik_solver_->IsInitialized()) {
+    LE_LOG_ERROR << "IK solver not initialized for tip link: " << tip_link_
                  << std::endl;
-    return false;
-  }
-
-  auto &ik_solver = it->second;
-  if (!ik_solver || !ik_solver->IsInitialized()) {
-    LE_LOG_ERROR << "IK solver not initialized for gripper link: "
-                 << gripper_link << std::endl;
     return false;
   }
 
   try {
     // 使用优化的IK求解，不打印调试信息
-    if (ik_solver->SolveIK(target_transform, joint_solution, seed_joints)) {
+    if (ik_solver_->SolveIK(target_transform, joint_solution, seed_joints)) {
       return true;
     }
     return false;
@@ -790,8 +721,8 @@ bool VrRobotController::IkGripperTf(const std::string &gripper_link,
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now -
                                                               last_warn_time)
             .count() > 1000) {
-      LE_LOG_ERROR << "Exception during IK solving for gripper link "
-                   << gripper_link << ": " << e.what() << std::endl;
+      LE_LOG_ERROR << "Exception during IK solving for tip link " << tip_link_
+                   << ": " << e.what() << std::endl;
       last_warn_time = now;
     }
     return false;
@@ -904,11 +835,7 @@ void VrRobotController::EeToJointWorkerLoop() {
       target_ee_pose_queue_cond_.wait(lock, [this] {
         if (!ee_to_joint_worker_running_)
           return true;
-        for (const auto &kv : target_ee_pose_queue_) {
-          if (!kv.second.empty())
-            return true;
-        }
-        return false;
+        return !target_ee_pose_queue_.empty();
       });
     }
 
@@ -916,8 +843,7 @@ void VrRobotController::EeToJointWorkerLoop() {
       break;
 
     // Swap queue to a local variable to minimize lock scope
-    std::map<std::string, std::deque<geometry_msgs::msg::TransformStamped>>
-        local_queue;
+    std::deque<geometry_msgs::msg::TransformStamped> local_queue;
     {
       std::unique_lock<std::mutex> lock(target_ee_pose_queue_mutex_);
       std::swap(local_queue, target_ee_pose_queue_);
@@ -931,144 +857,125 @@ void VrRobotController::EeToJointWorkerLoop() {
 }
 
 void VrRobotController::CalculateIk(
-    const std::map<std::string,
-                   std::deque<geometry_msgs::msg::TransformStamped>>
-        &local_queue) {
-  // Process each gripper link in the local queue
-  for (const auto &[gripper_link, pose_queue] : local_queue) {
-    if (pose_queue.empty())
+    const std::deque<geometry_msgs::msg::TransformStamped> &local_queue) {
+  if (local_queue.empty())
+    return;
+
+  size_t start_idx = 0;
+
+  // Get current joint state as seed for IK
+  JointPositionState current_joint_state = GetLatestJointState();
+
+  if (!ik_solver_ || !ik_solver_->IsInitialized()) {
+    LE_LOG_ERROR_T(5s) << "IK solver not initialized" << std::endl;
+    return;
+  }
+
+  std::vector<double> seed_joints;
+
+  // Extract joint names and positions from JointPositionState
+  std::vector<std::string> joint_names;
+  std::vector<double> joint_positions;
+  for (const auto &[name, position] : current_joint_state.joint_positions) {
+    joint_names.push_back(name);
+    joint_positions.push_back(position);
+  }
+
+  if (!ik_solver_->AlignJointStateToIk(joint_names, joint_positions,
+                                       seed_joints)) {
+    // Use empty seed joints as fallback
+    seed_joints.clear();
+  }
+
+  // Process only the most recent poses
+  for (size_t i = start_idx; i < local_queue.size(); ++i) {
+    const auto &target_pose_stamped = local_queue[i];
+
+    // Convert TransformStamped to tf2::Transform
+    tf2::Transform target_transform;
+    tf2::fromMsg(target_pose_stamped.transform, target_transform);
+
+    // Prepare for IK solution
+    std::vector<double> joint_solution;
+
+    auto calibration_target_transform =
+        NormalizeS101GripperTf(target_transform);
+
+    // TODO: delete it Publish calibration_target_transform to TF
+    {
+      geometry_msgs::msg::TransformStamped test_gripper_tf;
+      test_gripper_tf.header.stamp = node_->now();
+      test_gripper_tf.header.frame_id = gripper_world_frame_;
+      test_gripper_tf.child_frame_id = "test_gripper";
+      test_gripper_tf.transform = tf2::toMsg(calibration_target_transform);
+      tf_broadcaster_->sendTransform(test_gripper_tf);
+    }
+
+    // Call IK solver
+    if (!IkGripperTf(calibration_target_transform, joint_solution,
+                     seed_joints)) {
+      LE_LOG_ERROR_T(5s) << "IK solving failed at queue index: " << i
+                         << std::endl;
       continue;
-
-    size_t start_idx = 0;
-
-    // Get current joint state as seed for IK
-    JointPositionState current_joint_state = GetLatestJointState(gripper_link);
-
-    // Find the IK solver for this gripper link to use AlignJointStateToIk
-    auto ik_it = ik_solvers_.find(gripper_link);
-    if (ik_it == ik_solvers_.end()) {
-      LE_LOG_ERROR_T(5s) << "IK solver not found for gripper link: "
-                         << gripper_link << std::endl;
-      continue;
     }
 
-    std::vector<double> seed_joints;
+    // Apply joint position filtering to IK solution
+    // Note: Only IK-controlled joints are filtered, trigger-controlled joints
+    // bypass filtering
+    std::vector<double> filtered_joint_solution;
+    const auto ik_joint_names = ik_solver_->GetJointNames();
+    filtered_joint_solution.reserve(joint_solution.size());
 
-    // Extract joint names and positions from JointPositionState
-    std::vector<std::string> joint_names;
-    std::vector<double> joint_positions;
-    for (const auto &[name, position] : current_joint_state.joint_positions) {
-      joint_names.push_back(name);
-      joint_positions.push_back(position);
-    }
-
-    if (!ik_it->second->AlignJointStateToIk(joint_names, joint_positions,
-                                            seed_joints)) {
-      // Use empty seed joints as fallback
-      seed_joints.clear();
-    }
-
-    // Process only the most recent poses
-    for (size_t i = start_idx; i < pose_queue.size(); ++i) {
-      const auto &target_pose_stamped = pose_queue[i];
-
-      // Convert TransformStamped to tf2::Transform
-      tf2::Transform target_transform;
-      tf2::fromMsg(target_pose_stamped.transform, target_transform);
-
-      // Prepare for IK solution
-      std::vector<double> joint_solution;
-
-      auto calibration_target_transform =
-          NormalizeS101GripperTf(target_transform);
-
-      // TODO: delete it Publish calibration_target_transform to TF
-      {
-        geometry_msgs::msg::TransformStamped test_gripper_tf;
-        test_gripper_tf.header.stamp = node_->now();
-        test_gripper_tf.header.frame_id = gripper_world_frame_;
-        test_gripper_tf.child_frame_id = "test_gripper";
-        test_gripper_tf.transform = tf2::toMsg(calibration_target_transform);
-        tf_broadcaster_->sendTransform(test_gripper_tf);
-      }
-
-      // Call IK solver
-      if (!IkGripperTf(gripper_link, calibration_target_transform,
-                       joint_solution, seed_joints)) {
-        LE_LOG_ERROR_T(5s) << "IK solving failed for gripper link: "
-                           << gripper_link << " at queue index: " << i
-                           << std::endl;
-        continue;
-      }
-
-      // Apply joint position filtering to IK solution
-      // Note: Only IK-controlled joints are filtered, trigger-controlled joints
-      // bypass filtering
-      std::vector<double> filtered_joint_solution;
-      if (auto filter_it = joint_filters_.find(gripper_link);
-          filter_it != joint_filters_.end()) {
-        const auto joint_names = ik_it->second->GetJointNames();
-        filtered_joint_solution.reserve(joint_solution.size());
-
-        for (size_t j = 0; j < joint_solution.size(); ++j) {
-          if (j < joint_names.size()) {
-            const auto &joint_name = joint_names[j];
-            if (auto joint_filter_it = filter_it->second.find(joint_name);
-                joint_filter_it != filter_it->second.end()) {
-              // Apply filtering to this IK-controlled joint
-              filtered_joint_solution.push_back(
-                  joint_filter_it->second->Filter(joint_solution[j]));
-              continue;
-            }
-          }
-          filtered_joint_solution.push_back(joint_solution[j]);
+    for (size_t j = 0; j < joint_solution.size(); ++j) {
+      if (j < ik_joint_names.size()) {
+        const auto &joint_name = ik_joint_names[j];
+        if (auto joint_filter_it = joint_filters_.find(joint_name);
+            joint_filter_it != joint_filters_.end()) {
+          // Apply filtering to this IK-controlled joint
+          filtered_joint_solution.push_back(
+              joint_filter_it->second->Filter(joint_solution[j]));
+          continue;
         }
-      } else {
-        // No filters for this gripper, use original solution
-        filtered_joint_solution = joint_solution;
       }
-
-      filtered_joint_solution = joint_solution;
-
-      // Update seed for next iteration (use filtered values for smoother
-      // trajectory)
-      seed_joints = filtered_joint_solution;
-
-      PublishJointCmd(gripper_link, filtered_joint_solution);
-
-      // Send pose to control robot using filtered joint solution
-      std::vector<std::string> joint_names = ik_it->second->GetJointNames();
-      CusJointCmd joint_cmd =
-          Convert2CusJointCmd(joint_names, filtered_joint_solution);
-      JointCmdEnqueue(gripper_link, joint_cmd);
+      filtered_joint_solution.push_back(joint_solution[j]);
     }
+
+    filtered_joint_solution = joint_solution;
+
+    // Update seed for next iteration (use filtered values for smoother
+    // trajectory)
+    seed_joints = filtered_joint_solution;
+
+    PublishJointCmd(filtered_joint_solution);
+
+    // Send pose to control robot using filtered joint solution
+    std::vector<std::string> solver_joint_names = ik_solver_->GetJointNames();
+    CusJointCmd joint_cmd =
+        Convert2CusJointCmd(solver_joint_names, filtered_joint_solution);
+    JointCmdEnqueue(joint_cmd);
   }
 }
 
 void VrRobotController::UpdateJointState(
     const sensor_msgs::msg::JointState::SharedPtr msg) {
-  // Parse joints in the message and check against each IK solver's joint names
-  for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
-    if (!ik_solver || !ik_solver->IsInitialized()) {
-      continue;
-    }
+  if (!ik_solver_ || !ik_solver_->IsInitialized()) {
+    return;
+  }
 
-    // Get joint names from the IK solver
-    std::vector<std::string> solver_joint_names = ik_solver->GetJointNames();
+  // Get joint names from the IK solver
+  std::vector<std::string> solver_joint_names = ik_solver_->GetJointNames();
 
-    // Convert sensor_msgs::msg::JointState to JointPositionState
-    auto joint_state_opt = ConvertJointStateToJointPositionState(
-        msg, gripper_link, solver_joint_names);
+  // Convert sensor_msgs::msg::JointState to JointPositionState
+  auto joint_state_opt =
+      ConvertJointStateToJointPositionState(msg, solver_joint_names);
 
-    // If conversion was successful, update the map
-    if (joint_state_opt.has_value()) {
-      UpdateLatestJointStateMap(gripper_link, joint_state_opt.value());
-    }
+  // If conversion was successful, update the latest joint state
+  if (joint_state_opt.has_value()) {
+    UpdateLatestJointState(joint_state_opt.value());
   }
 }
 
-JointPositionState VrRobotController::GetLatestJointState(
-    [[maybe_unused]] const std::string &gripper_link) const {
+JointPositionState VrRobotController::GetLatestJointState() const {
   // Get joint state directly from robot control interface
   if (!robot_control_interface_) {
     LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
@@ -1082,24 +989,20 @@ JointPositionState VrRobotController::GetLatestJointState(
   return full_joint_state;
 }
 
-JointPositionState VrRobotController::GetLatestJointPositionState(
-    const std::string &gripper_link) const {
-  std::shared_lock<std::shared_mutex> lock(latest_joint_state_map_mutex_);
-  auto it = latest_joint_state_map_.find(gripper_link);
-  if (it != latest_joint_state_map_.end()) {
-    return it->second;
-  }
-
-  // Return empty joint position state if gripper_link not found
-  return JointPositionState();
+JointPositionState VrRobotController::GetLatestJointPositionState() const {
+  std::shared_lock<std::shared_mutex> lock(latest_joint_state_mutex_);
+  return latest_joint_state_;
 }
 
-double VrRobotController::ConvertTriggerJointPosition(
-    const std::string &gripper_joint_name, double trigger_value) const {
+double
+VrRobotController::ConvertTriggerJointPosition(double trigger_value) const {
   if (!trigger_converter_) {
     LE_LOG_ERROR << "Trigger converter not initialized" << std::endl;
     return 0.0;
   }
+
+  // Use default gripper joint name
+  const std::string gripper_joint_name = kDefaultGripperJointName;
 
   if (!trigger_converter_->HasJoint(gripper_joint_name)) {
     LE_LOG_ERROR << "Joint not configured in trigger converter: "
@@ -1115,8 +1018,7 @@ CusJointCmd
 VrRobotController::Convert2CusJointCmd(const std::string &gripper_joint_name,
                                        double trigger_value) const {
   // Get the converted joint position using existing function
-  double joint_position =
-      ConvertTriggerJointPosition(gripper_joint_name, trigger_value);
+  double joint_position = ConvertTriggerJointPosition(trigger_value);
 
   // Create joint name-position pair
   std::vector<std::pair<std::string, double>> joints;
@@ -1150,36 +1052,25 @@ CusJointCmd VrRobotController::Convert2CusJointCmd(
 }
 
 void VrRobotController::PublishJointCmd(
-    const std::string &gripper_link,
     const std::vector<double> &joint_solution) {
   if (!joint_state_publisher_) {
     LE_LOG_ERROR << "Joint command publisher not initialized" << std::endl;
     return;
   }
 
-  // Find the IK solver for this gripper link to get joint names
-  auto ik_it = ik_solvers_.find(gripper_link);
-  if (ik_it == ik_solvers_.end()) {
-    LE_LOG_ERROR << "IK solver not found for gripper link: " << gripper_link
-                 << std::endl;
-    return;
-  }
-
-  auto &ik_solver = ik_it->second;
-  if (!ik_solver || !ik_solver->IsInitialized()) {
-    LE_LOG_ERROR << "IK solver not initialized for gripper link: "
-                 << gripper_link << std::endl;
+  if (!ik_solver_ || !ik_solver_->IsInitialized()) {
+    LE_LOG_ERROR << "IK solver not initialized" << std::endl;
     return;
   }
 
   // Get joint names from the IK solver
-  std::vector<std::string> joint_names = ik_solver->GetJointNames();
+  std::vector<std::string> joint_names = ik_solver_->GetJointNames();
 
   // Verify joint solution size matches joint names size
   if (joint_solution.size() != joint_names.size()) {
     LE_LOG_ERROR << "Joint solution size (" << joint_solution.size()
                  << ") doesn't match joint names size (" << joint_names.size()
-                 << ") for gripper: " << gripper_link << std::endl;
+                 << ")" << std::endl;
     return;
   }
 
@@ -1201,7 +1092,7 @@ void VrRobotController::PublishJointCmd(
 }
 
 void VrRobotController::TargetVrPoseEnqueue(
-    const std::string &gripper_link, geometry_msgs::msg::TransformStamped ts) {
+    geometry_msgs::msg::TransformStamped ts) {
 
   if (!IsControlRobot()) {
     return;
@@ -1210,19 +1101,17 @@ void VrRobotController::TargetVrPoseEnqueue(
   // Enqueue result under mutex protection
   {
     std::unique_lock<std::mutex> lock(target_ee_pose_queue_mutex_);
-    auto &queue = target_ee_pose_queue_[gripper_link];
-    queue.emplace_back(std::move(ts));
+    target_ee_pose_queue_.emplace_back(std::move(ts));
 
     // Limit queue size to prevent memory bloat and reduce processing load
-    while (queue.size() > 10) {
-      queue.pop_front();
+    while (target_ee_pose_queue_.size() > 10) {
+      target_ee_pose_queue_.pop_front();
     }
   }
   target_ee_pose_queue_cond_.notify_one();
 }
 
-void VrRobotController::JointCmdEnqueue(const std::string &gripper_link,
-                                        const CusJointCmd &joint_cmd) {
+void VrRobotController::JointCmdEnqueue(const CusJointCmd &joint_cmd) {
   if (!robot_control_interface_) {
     LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
     return;
@@ -1230,13 +1119,11 @@ void VrRobotController::JointCmdEnqueue(const std::string &gripper_link,
 
   // Enqueue the command to the robot control interface directly
   if (!robot_control_interface_->EnqueueJointCommand(joint_cmd)) {
-    LE_LOG_ERROR_T(5s) << "Failed to enqueue joint command for gripper: "
-                       << gripper_link << std::endl;
+    LE_LOG_ERROR_T(5s) << "Failed to enqueue joint command" << std::endl;
   }
 }
 
-void VrRobotController::GripperCmdEnqueue(const std::string &gripper_link,
-                                          const CusJointCmd &gripper_cmd) {
+void VrRobotController::GripperCmdEnqueue(const CusJointCmd &gripper_cmd) {
   if (!robot_control_interface_) {
     LE_LOG_ERROR << "Robot control interface not initialized" << std::endl;
     return;
@@ -1244,8 +1131,7 @@ void VrRobotController::GripperCmdEnqueue(const std::string &gripper_link,
 
   // Enqueue the command to the robot control interface directly
   if (!robot_control_interface_->EnqueueGripperCommand(gripper_cmd)) {
-    LE_LOG_ERROR_T(5s) << "Failed to enqueue gripper command for gripper: "
-                       << gripper_link << std::endl;
+    LE_LOG_ERROR_T(5s) << "Failed to enqueue gripper command" << std::endl;
   }
 }
 
@@ -1276,12 +1162,12 @@ void VrRobotController::StopRobotControl() {
 }
 
 bool VrRobotController::MoveToHomePose() {
-  if (ik_solvers_.empty()) {
-    LE_LOG_ERROR << "No IK solvers available" << std::endl;
+  if (!ik_solver_) {
+    LE_LOG_ERROR << "No IK solver available" << std::endl;
     return false;
   }
 
-  LE_LOG_INFO << "Moving all robots to home pose" << std::endl;
+  LE_LOG_INFO << "Moving robot to home pose" << std::endl;
 
   bool all_success = true;
 
@@ -1291,59 +1177,52 @@ bool VrRobotController::MoveToHomePose() {
                 << home_pose_joint_position_.joint_positions.size() << " joints"
                 << std::endl;
 
-    // Group joints by gripper for each robot
-    for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
-      if (!ik_solver) {
-        LE_LOG_ERROR << "IK solver for " << gripper_link << " is null"
+    if (!ik_solver_) {
+      LE_LOG_ERROR << "IK solver is null" << std::endl;
+      all_success = false;
+    } else {
+      // Get joint names from the IK solver
+      std::vector<std::string> solver_joint_names = ik_solver_->GetJointNames();
+      if (solver_joint_names.empty()) {
+        LE_LOG_ERROR << "No joint names found for tip link: " << tip_link_
                      << std::endl;
         all_success = false;
-        continue;
-      }
+      } else {
+        // Find matching joints from home pose configuration
+        std::vector<std::string> matching_joint_names;
+        std::vector<double> matching_positions;
 
-      // Get joint names from the IK solver
-      std::vector<std::string> solver_joint_names = ik_solver->GetJointNames();
-      if (solver_joint_names.empty()) {
-        LE_LOG_ERROR << "No joint names found for gripper link: "
-                     << gripper_link << std::endl;
-        all_success = false;
-        continue;
-      }
-
-      // Find matching joints from home pose configuration
-      std::vector<std::string> matching_joint_names;
-      std::vector<double> matching_positions;
-
-      for (const std::string &solver_joint : solver_joint_names) {
-        bool found = false;
-        for (const auto &[home_joint_name, home_position] :
-             home_pose_joint_position_.joint_positions) {
-          if (solver_joint == home_joint_name) {
-            matching_joint_names.push_back(home_joint_name);
-            matching_positions.push_back(home_position);
-            found = true;
-            break;
+        for (const std::string &solver_joint : solver_joint_names) {
+          bool found = false;
+          for (const auto &[home_joint_name, home_position] :
+               home_pose_joint_position_.joint_positions) {
+            if (solver_joint == home_joint_name) {
+              matching_joint_names.push_back(home_joint_name);
+              matching_positions.push_back(home_position);
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            // Use default 0.0 for joints not specified in home pose
+            matching_joint_names.push_back(solver_joint);
+            matching_positions.push_back(0.0);
+            LE_LOG_INFO << "Joint " << solver_joint
+                        << " not found in home pose config, using default 0.0"
+                        << std::endl;
           }
         }
-        if (!found) {
-          // Use default 0.0 for joints not specified in home pose
-          matching_joint_names.push_back(solver_joint);
-          matching_positions.push_back(0.0);
-          LE_LOG_INFO << "Joint " << solver_joint
-                      << " not found in home pose config, using default 0.0"
-                      << std::endl;
-        }
+
+        // Convert to CusJointCmd
+        CusJointCmd home_cmd =
+            Convert2CusJointCmd(matching_joint_names, matching_positions);
+
+        // Enqueue the command
+        JointCmdEnqueue(home_cmd);
+
+        LE_LOG_INFO << "Enqueued home pose command with "
+                    << matching_joint_names.size() << " joints" << std::endl;
       }
-
-      // Convert to CusJointCmd
-      CusJointCmd home_cmd =
-          Convert2CusJointCmd(matching_joint_names, matching_positions);
-
-      // Enqueue the command
-      JointCmdEnqueue(gripper_link, home_cmd);
-
-      LE_LOG_INFO << "Enqueued home pose command for " << gripper_link
-                  << " with " << matching_joint_names.size() << " joints"
-                  << std::endl;
     }
 
     // Handle gripper joint from home pose configuration
@@ -1364,7 +1243,7 @@ bool VrRobotController::MoveToHomePose() {
         Convert2CusJointCmd(gripper_joint_name, home_gripper_position);
 
     // Enqueue the gripper command
-    GripperCmdEnqueue(gripper_joint_name, gripper_home_cmd);
+    GripperCmdEnqueue(gripper_home_cmd);
 
     LE_LOG_INFO << "Enqueued home gripper command for joint: "
                 << gripper_joint_name << " (position: " << home_gripper_position
@@ -1377,38 +1256,32 @@ bool VrRobotController::MoveToHomePose() {
                    "joints = 0)"
                 << std::endl;
 
-    // Iterate through all IK solvers to get joint names for each robot
-    for (const auto &[gripper_link, ik_solver] : ik_solvers_) {
-      if (!ik_solver) {
-        LE_LOG_ERROR << "IK solver for " << gripper_link << " is null"
+    if (!ik_solver_) {
+      LE_LOG_ERROR << "IK solver is null" << std::endl;
+      all_success = false;
+    } else {
+      // Get joint names from the IK solver
+      std::vector<std::string> joint_names = ik_solver_->GetJointNames();
+      if (joint_names.empty()) {
+        LE_LOG_ERROR << "No joint names found for tip link: " << tip_link_
                      << std::endl;
         all_success = false;
-        continue;
+      } else {
+        // Create home position (all joints = 0)
+        std::vector<double> home_positions(joint_names.size(), 0.0);
+
+        // Convert to CusJointCmd
+        CusJointCmd home_cmd = Convert2CusJointCmd(joint_names, home_positions);
+
+        // Enqueue the command
+        JointCmdEnqueue(home_cmd);
+
+        LE_LOG_INFO << "Enqueued home pose command with " << joint_names.size()
+                    << " joints" << std::endl;
       }
-
-      // Get joint names from the IK solver
-      std::vector<std::string> joint_names = ik_solver->GetJointNames();
-      if (joint_names.empty()) {
-        LE_LOG_ERROR << "No joint names found for gripper link: "
-                     << gripper_link << std::endl;
-        all_success = false;
-        continue;
-      }
-
-      // Create home position (all joints = 0)
-      std::vector<double> home_positions(joint_names.size(), 0.0);
-
-      // Convert to CusJointCmd
-      CusJointCmd home_cmd = Convert2CusJointCmd(joint_names, home_positions);
-
-      // Enqueue the command
-      JointCmdEnqueue(gripper_link, home_cmd);
-
-      LE_LOG_INFO << "Enqueued home pose command for " << gripper_link
-                  << " with " << joint_names.size() << " joints" << std::endl;
     }
 
-    // Also move all gripper joints to home position (closed state = 0.0)
+    // Also move gripper joint to home position (closed state = 0.0)
     // Create home position for gripper joint (closed state)
     std::string gripper_joint_name = "gripper";
     double home_trigger_value = 0.0;
@@ -1418,7 +1291,7 @@ bool VrRobotController::MoveToHomePose() {
         Convert2CusJointCmd(gripper_joint_name, home_trigger_value);
 
     // Enqueue the gripper command
-    GripperCmdEnqueue(gripper_joint_name, gripper_home_cmd);
+    GripperCmdEnqueue(gripper_home_cmd);
 
     LE_LOG_INFO << "Enqueued home gripper command for joint: "
                 << gripper_joint_name
@@ -1427,12 +1300,11 @@ bool VrRobotController::MoveToHomePose() {
   }
 
   if (all_success) {
-    LE_LOG_INFO << "Successfully enqueued home pose commands for all robots "
-                   "and grippers"
-                << std::endl;
+    LE_LOG_INFO
+        << "Successfully enqueued home pose commands for robot and gripper"
+        << std::endl;
   } else {
-    LE_LOG_ERROR << "Some robots failed to enqueue home pose commands"
-                 << std::endl;
+    LE_LOG_ERROR << "Failed to enqueue some home pose commands" << std::endl;
   }
 
   return all_success;
@@ -1460,7 +1332,6 @@ sensor_msgs::msg::JointState VrRobotController::ConvertToRosJointState(
 std::optional<JointPositionState>
 VrRobotController::ConvertJointStateToJointPositionState(
     const sensor_msgs::msg::JointState::SharedPtr msg,
-    [[maybe_unused]] const std::string &gripper_link,
     const std::vector<std::string> &solver_joint_names) {
   // Check if all joints from the solver are present in the message
   bool all_joints_found = true;
@@ -1498,12 +1369,12 @@ VrRobotController::ConvertJointStateToJointPositionState(
   return std::nullopt;
 }
 
-void VrRobotController::UpdateLatestJointStateMap(
-    const std::string &gripper_link, const JointPositionState &joint_state) {
-  // Store the joint position state for this gripper with thread safety
+void VrRobotController::UpdateLatestJointState(
+    const JointPositionState &joint_state) {
+  // Store the joint position state with thread safety
   {
-    std::unique_lock<std::shared_mutex> lock(latest_joint_state_map_mutex_);
-    latest_joint_state_map_[gripper_link] = joint_state;
+    std::unique_lock<std::shared_mutex> lock(latest_joint_state_mutex_);
+    latest_joint_state_ = joint_state;
   }
 }
 
@@ -1513,35 +1384,30 @@ void VrRobotController::PublishRobotJointStates() {
     return;
   }
 
-  // Get all available gripper links from the configuration
-  sensor_msgs::msg::JointState combined_joint_state;
-  combined_joint_state.header.stamp = node_->now();
-  combined_joint_state.header.frame_id = gripper_world_frame_;
+  // Get the latest joint state
+  JointPositionState joint_position_state = GetLatestJointState();
 
-  // Collect joint states from all gripper links configured in the system
-  for (const auto &[gripper_link, vr_frame] : gripper_link_to_vr_map_) {
-    // Get the latest joint state for this gripper
-    JointPositionState joint_position_state = GetLatestJointState(gripper_link);
-
-    if (joint_position_state.joint_positions.empty()) {
-      // Skip if no joint state available for this gripper
-      continue;
-    }
-
-    // Add each joint to the combined message
-    for (const auto &[joint_name, position] :
-         joint_position_state.joint_positions) {
-      combined_joint_state.name.push_back(joint_name);
-      combined_joint_state.position.push_back(position);
-      combined_joint_state.velocity.push_back(0.0); // Set velocity to zero
-      combined_joint_state.effort.push_back(0.0);   // Set effort to zero
-    }
+  if (joint_position_state.joint_positions.empty()) {
+    // Skip if no joint state available
+    return;
   }
 
-  // Only publish if we have joint data
-  if (!combined_joint_state.name.empty()) {
-    robot_joint_state_publisher_->publish(combined_joint_state);
+  // Create joint state message
+  sensor_msgs::msg::JointState joint_state_msg;
+  joint_state_msg.header.stamp = node_->now();
+  joint_state_msg.header.frame_id = gripper_world_frame_;
+
+  // Add each joint to the message
+  for (const auto &[joint_name, position] :
+       joint_position_state.joint_positions) {
+    joint_state_msg.name.push_back(joint_name);
+    joint_state_msg.position.push_back(position);
+    joint_state_msg.velocity.push_back(0.0); // Set velocity to zero
+    joint_state_msg.effort.push_back(0.0);   // Set effort to zero
   }
+
+  // Publish the joint state
+  robot_joint_state_publisher_->publish(joint_state_msg);
 }
 
 } // namespace lerobot_vr_controller
