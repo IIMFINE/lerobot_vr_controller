@@ -54,8 +54,8 @@ bool SoArm101Kinematics::Initialize(const std::string &urdf_string,
   // 初始化TRAC-IK求解器，使用优化配置
   trac_ik_solver_ = std::make_unique<TRAC_IK::TRAC_IK>(
       base_link_, tip_link_, urdf_string, timeout_,
-      1e-5,               // 构造函数中的公差参数优先级较低
-      TRAC_IK::Distance); // 使用Distance类型求解，以最小化关节空间跳变
+      1e-5, // 略放宽公差以减少迭代次数
+      TRAC_IK::Distance);
 
   if (!trac_ik_solver_->getKDLChain(kinematic_chain_)) {
     LE_LOG_ERROR << "Failed to get KDL chain from TRAC-IK" << std::endl;

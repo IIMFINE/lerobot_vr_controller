@@ -125,6 +125,9 @@ private:
   tf2::Transform
   ApplyTargetTfFineTune(const tf2::Transform &target_transform) const;
 
+  // Apply constraints and limits to target transform
+  tf2::Transform LimitTargetTf(const tf2::Transform &target_transform) const;
+
   // Control joint with end effector poses from local queue
   void ProcessEePose(
       const std::deque<geometry_msgs::msg::TransformStamped> &local_queue);

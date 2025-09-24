@@ -8,7 +8,7 @@ vr_world_frame: world_vr
 ik_tolerances:
   position_tolerance: 0.03    # Position tolerance in meters
   orientation_tolerance: 0.02  # Orientation tolerance in radians
-  xy_max_reach: 0.6           # Maximum xy plane reach limit in meters
+  xy_max_reach: 0.47           # Maximum xy plane reach limit in meters
 
 joy_config:
   trigger_config:
@@ -18,7 +18,7 @@ joy_config:
       gripper: /vr/controller_right/joy
   axes_config:
     # meter unit input from axes
-    z_advance_scale: -0.003
+    z_advance_scale: -0.0015
     # radian unit input from axes
     z_clockwise_rotate_scale: -0.03
 

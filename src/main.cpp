@@ -67,7 +67,12 @@ int main(int argc, char **argv) {
   RCLCPP_INFO(node->get_logger(), "VR TF Receiver node started successfully");
 
   // Spin the executor in a separate thread
-  std::thread spin_thread([&executor]() { executor.spin(); });
+  std::thread spin_thread([&executor]() {
+    while (rclcpp::ok()) {
+      executor.spin_some();
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
 
   // Keep main thread alive
   while (rclcpp::ok()) {
