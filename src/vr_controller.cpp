@@ -748,8 +748,9 @@ tf2::Transform VrRobotController::NormalizeS101GripperTf(
 
   tf2::Quaternion q = target_transform.getRotation();
 
-  const double k_eps = 1e-12;
-  const double k_pi = 3.14159265358979323846;
+  constexpr double kEps = 1e-12;
+  constexpr double kPi = 3.14159265358979323846;
+  constexpr double kTwoPi = 2.0 * kPi;
 
   // 若末端位姿位于世界Z轴上(x=y=0)，-Z射线天然与世界Z轴相交
   if (std::abs(position.x()) < 1e-9 && std::abs(position.y()) < 1e-9) {
@@ -762,14 +763,12 @@ tf2::Transform VrRobotController::NormalizeS101GripperTf(
 
   // 目标：使工具坐标系的 -Z 方向在 XY 平面上的投影与指向原点的径向向量对齐，
   // 从而保证沿 -Z 的射线与世界Z轴相交。
-  auto normalize_angle = [](double a) {
-    const double pi = 3.14159265358979323846;
-    const double two_pi = 2.0 * pi;
-    while (a > pi)
-      a -= two_pi;
-    while (a < -pi)
-      a += two_pi;
-    return a;
+  auto normalize_angle = [kPi, kTwoPi](double angle) {
+    while (angle > kPi)
+      angle -= kTwoPi;
+    while (angle < -kPi)
+      angle += kTwoPi;
+    return angle;
   };
 
   tf2::Matrix3x3 rot_m(q);
@@ -784,7 +783,7 @@ tf2::Transform VrRobotController::NormalizeS101GripperTf(
   tf2::Vector3 neg_z_xy(neg_z.x(), neg_z.y(), 0.0);
   if (neg_z_xy.length2() < 1e-16) {
     tf2::Vector3 tilt_axis(radial_dir.y(), -radial_dir.x(), 0.0); // 与径向正交
-    if (tilt_axis.length2() > k_eps) {
+    if (tilt_axis.length2() > kEps) {
       tilt_axis.normalize();
       const double tilt_angle = 0.08726646259971647; // 5度
       tf2::Quaternion q_tilt;
@@ -811,11 +810,11 @@ tf2::Transform VrRobotController::NormalizeS101GripperTf(
   rot_m.setRotation(q);
   neg_z = -(rot_m * tf2::Vector3(0.0, 0.0, 1.0));
   tf2::Vector3 neg_z_xy2(neg_z.x(), neg_z.y(), 0.0);
-  if (neg_z_xy2.length2() > k_eps) {
+  if (neg_z_xy2.length2() > kEps) {
     neg_z_xy2.normalize();
     if (neg_z_xy2.dot(radial_dir) < 0.0) {
       tf2::Quaternion q_flip;
-      q_flip.setRPY(0.0, 0.0, k_pi);
+      q_flip.setRPY(0.0, 0.0, kPi);
       q = q_flip * q;
       q.normalize();
     }
