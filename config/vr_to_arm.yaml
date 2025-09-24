@@ -8,7 +8,7 @@ vr_world_frame: world_vr
 ik_tolerances:
   position_tolerance: 0.03    # Position tolerance in meters
   orientation_tolerance: 0.02  # Orientation tolerance in radians
-  xy_max_reach: 0.4           # Maximum xy plane reach limit in meters
+  xy_max_reach: 0.6           # Maximum xy plane reach limit in meters
 
 trigger_config:
 # 1 trigger position = 0.0068 radians

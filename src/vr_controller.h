@@ -63,13 +63,11 @@ public:
   void Start();
 
   // === Joint State Functions ===
-  // Get the latest joint state snapshot for a specific gripper
-  JointPositionState GetLatestJointState(const std::string &gripper_link) const;
+  // Get the latest joint state snapshot
+  JointPositionState GetLatestJointState() const;
 
-  // Get the latest joint position state for a specific gripper (returns
-  // JointPositionState)
-  JointPositionState
-  GetLatestJointPositionState(const std::string &gripper_link) const;
+  // Get the latest joint position state (returns JointPositionState)
+  JointPositionState GetLatestJointPositionState() const;
 
   // Convert JointPositionState to sensor_msgs::msg::JointState
   sensor_msgs::msg::JointState
@@ -77,8 +75,7 @@ public:
 
   // === Conversion Functions ===
   // Convert VR trigger value to gripper joint position
-  double ConvertTriggerJointPosition(const std::string &gripper_link,
-                                     double trigger_value) const;
+  double ConvertTriggerJointPosition(double trigger_value) const;
 
   // Convert VR trigger value to CusJointCmd
   CusJointCmd Convert2CusJointCmd(const std::string &gripper_joint_name,
@@ -109,8 +106,7 @@ private:
   // Initialize joint position filters for all grippers
   void InitJointFilters();
 
-  bool IkGripperTf(const std::string &gripper_link,
-                   const tf2::Transform &target_transform,
+  bool IkGripperTf(const tf2::Transform &target_transform,
                    std::vector<double> &joint_solution,
                    const std::vector<double> &seed_joints = {});
 
@@ -118,18 +114,14 @@ private:
   tf2::Transform NormalizeS101GripperTf(const tf2::Transform &target_transform);
 
   // Control joint with end effector poses from local queue
-  void
-  CalculateIk(const std::map<std::string,
-                             std::deque<geometry_msgs::msg::TransformStamped>>
-                  &local_queue);
+  void CalculateIk(const std::deque<geometry_msgs::msg::TransformStamped> &local_queue);
 
   // Worker loop that watches the target_ee_pose_queue_ and triggers
   // EePoseIktoJointCmd
   void EeToJointWorkerLoop();
 
   // === VR Transform Functions ===
-  tf2::Transform Vr2GripperTf(const std::string &gripper_link,
-                              const std::string &vr_frame);
+  tf2::Transform Vr2GripperTf(const std::string &vr_frame);
 
   void CalibrateVr2GripperTf();
 
@@ -150,34 +142,27 @@ private:
   bool LoadYamlConfig(const std::string &yaml_file_path);
 
   // === Joint State Conversion Functions ===
-  // Convert sensor_msgs::msg::JointState to JointPositionState for specific
-  // gripper
+  // Convert sensor_msgs::msg::JointState to JointPositionState
   std::optional<JointPositionState> ConvertJointStateToJointPositionState(
       const sensor_msgs::msg::JointState::SharedPtr msg,
-      const std::string &gripper_link,
       const std::vector<std::string> &solver_joint_names);
 
-  // Update JointPositionState to latest_joint_state_map_
-  void UpdateLatestJointStateMap(const std::string &gripper_link,
-                                 const JointPositionState &joint_state);
+  // Update JointPositionState to latest_joint_state_
+  void UpdateLatestJointState(const JointPositionState &joint_state);
 
   // === Command Queue Functions ===
   // Enqueue target VR pose to target_ee_pose_queue_ with mutex protection
-  void TargetVrPoseEnqueue(const std::string &gripper_link,
-                           geometry_msgs::msg::TransformStamped ts);
+  void TargetVrPoseEnqueue(geometry_msgs::msg::TransformStamped ts);
 
   // Enqueue joint command to joint_cmd_queue_
-  void JointCmdEnqueue(const std::string &gripper_link,
-                       const CusJointCmd &joint_cmd);
+  void JointCmdEnqueue(const CusJointCmd &joint_cmd);
 
   // Enqueue gripper command to gripper_cmd_queue_
-  void GripperCmdEnqueue(const std::string &gripper_link,
-                         const CusJointCmd &gripper_cmd);
+  void GripperCmdEnqueue(const CusJointCmd &gripper_cmd);
 
   // === Publishing Functions ===
   // Publish joint commands for rviz2 visualization
-  void PublishJointCmd(const std::string &gripper_link,
-                       const std::vector<double> &joint_solution);
+  void PublishJointCmd(const std::vector<double> &joint_solution);
 
   // Publish current robot joint states at 100Hz
   void PublishRobotJointStates();
@@ -210,7 +195,11 @@ private:
   // URDF file path
   std::string urdf_file_path_;
 
-  std::map<std::string, std::string> gripper_link_to_vr_map_;
+  // Tip link (gripper link) name
+  std::string tip_link_;
+
+  // VR frame name mapped to the tip link
+  std::string vr_frame_;
 
   // Configurable world frame names
   std::string gripper_world_frame_;
@@ -231,19 +220,17 @@ private:
   std::atomic<bool> should_calibrate_{false};
   std::atomic<bool> calibrated_flag_{false};
 
-  // Store VR to gripper transformation matrices
-  std::map<std::string, geometry_msgs::msg::TransformStamped>
-      vr_base_link_dummy_tf_;
+  // Store VR to gripper transformation matrix
+  geometry_msgs::msg::TransformStamped vr_base_link_dummy_tf_;
 
-  std::map<std::string, tf2::Quaternion> vr_wrist_to_gripper_rot_;
+  tf2::Quaternion vr_wrist_to_gripper_rot_;
 
   // Shared mutex for thread-safe access to vr_base_link_dummy_tf_
   mutable std::shared_mutex vr_base_link_dummy_tf_mutex_;
 
   // === Pose Queue Data ===
-  // Queue of target EE poses per gripper link
-  std::map<std::string, std::deque<geometry_msgs::msg::TransformStamped>>
-      target_ee_pose_queue_;
+  // Queue of target EE poses
+  std::deque<geometry_msgs::msg::TransformStamped> target_ee_pose_queue_;
 
   // Mutex + condition variable for target_ee_pose_queue_
   mutable std::mutex target_ee_pose_queue_mutex_;
@@ -252,19 +239,17 @@ private:
   // === Command Queue Data ===
   std::shared_mutex joint_cmd_queue_mutex_;
   std::condition_variable joint_cmd_queue_cond_;
-  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
-      joint_cmd_queue_;
+  std::deque<sensor_msgs::msg::JointState> joint_cmd_queue_;
 
   std::shared_mutex gripper_cmd_queue_mutex_;
   std::condition_variable gripper_cmd_queue_cond_;
-  std::map<std::string, std::deque<sensor_msgs::msg::JointState>>
-      gripper_cmd_queue_;
+  std::deque<sensor_msgs::msg::JointState> gripper_cmd_queue_;
 
   // === Joint State Data ===
-  std::map<std::string, JointPositionState> latest_joint_state_map_;
+  JointPositionState latest_joint_state_;
 
-  // Shared mutex for thread-safe access to latest_joint_state_map_
-  mutable std::shared_mutex latest_joint_state_map_mutex_;
+  // Shared mutex for thread-safe access to latest_joint_state_
+  mutable std::shared_mutex latest_joint_state_mutex_;
 
   // === Timers ===
   // Timer for calibration at 10Hz
@@ -297,13 +282,11 @@ private:
       robot_joint_state_publisher_;
 
   // === Control Components ===
-  // IK solvers for each gripper link
-  std::map<std::string, std::unique_ptr<SoArm101Kinematics>> ik_solvers_;
+  // IK solver
+  std::unique_ptr<SoArm101Kinematics> ik_solver_;
 
-  // Joint position filters for each gripper link and joint
-  std::map<std::string,
-           std::map<std::string, std::unique_ptr<JointPositionFilter>>>
-      joint_filters_;
+  // Joint position filters for each joint
+  std::map<std::string, std::unique_ptr<JointPositionFilter>> joint_filters_;
 
   // VR trigger to joint converter
   std::unique_ptr<vr_controller::VrTriggerJointConvert> trigger_converter_;
