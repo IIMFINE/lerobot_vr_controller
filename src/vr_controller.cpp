@@ -104,7 +104,7 @@ void VrRobotController::Start() {
       node_->create_publisher<sensor_msgs::msg::JointState>(kJointStatesTopic,
                                                             rclcpp::QoS(10));
 
-  // Create timer to execute CalibrateVr2GripperTf at 10Hz (100ms interval)
+  // Create timer to execute CalibrateVr2GripperTf at 100Hz (100ms interval)
   calibration_timer_ = node_->create_wall_timer(
       std::chrono::milliseconds(10),
       std::bind(&VrRobotController::CalibrateVr2GripperTf, this),
@@ -596,22 +596,6 @@ void VrRobotController::JoystickCallback(
 
   constexpr const int kSideTriggerThreshold = 200;
 
-  // Check if buttons array has at least 6 elements (B button index)
-  if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
-    should_calibrate_ = true;
-    StartRobotControl();
-    MoveToHomePose();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    StopRobotControl();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    ee_pose_fine_tune_.z_advance_ = 0.0;
-    ee_pose_fine_tune_.z_clockwise_rotate_ = 0.0;
-    LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
-                      << std::endl;
-    LE_LOG_INFO_T(1s) << "Calibration triggered by joystick B button"
-                      << std::endl;
-  }
-
   // Control robot_control_interface_ based on side trigger button value
   if (msg->buttons.size() > kSideTriggerButton && robot_control_interface_) {
     int side_trigger_value = msg->buttons[kSideTriggerButton];
@@ -624,6 +608,25 @@ void VrRobotController::JoystickCallback(
       LE_LOG_INFO_T(5s) << "Robot control stopped by side trigger: "
                         << side_trigger_value << std::endl;
     }
+  }
+
+  // Check if buttons array has at least 6 elements (B button index)
+  if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
+    should_calibrate_ = true;
+    {
+      std::unique_lock<std::shared_mutex> lock(ee_pose_fine_tune_mutex_);
+      ee_pose_fine_tune_.z_advance_ = 0.0;
+      ee_pose_fine_tune_.z_clockwise_rotate_ = 0.0;
+    }
+    StartRobotControl();
+    MoveToHomePose();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    StopRobotControl();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
+                      << std::endl;
+    LE_LOG_INFO_T(1s) << "Calibration triggered by joystick B button"
+                      << std::endl;
   }
 
   // Handle trigger input for gripper control based on joint_mappings
@@ -660,17 +663,19 @@ void VrRobotController::JoystickCallback(
   if (msg->axes.size() > kZAdvanceAxis) {
     std::unique_lock<std::shared_mutex> lock(ee_pose_fine_tune_mutex_);
 
+    double z_advance_delta = msg->axes[kZAdvanceAxis] * z_advance_scale_;
+
     // axes[kZAdvanceAxis] -> z_advance (累积增加/减少)
-    ee_pose_fine_tune_.z_advance_ +=
-        msg->axes[kZAdvanceAxis] * z_advance_scale_;
+    ee_pose_fine_tune_.z_advance_ += z_advance_delta;
 
     // axes[kZClockwiseRotateAxis] -> z_clockwise_rotate (累积增加/减少)
-  ee_pose_fine_tune_.z_clockwise_rotate_ +=
-      msg->axes[kZClockwiseRotateAxis] * z_clockwise_rotate_scale_;
+    ee_pose_fine_tune_.z_clockwise_rotate_ +=
+        msg->axes[kZClockwiseRotateAxis] * z_clockwise_rotate_scale_;
 
-  LE_LOG_INFO_T(2s) << "EE pose fine tune - Z advance: "
-                    << ee_pose_fine_tune_.z_advance_ << ", Z clockwise rotate: "
-                    << ee_pose_fine_tune_.z_clockwise_rotate_ << std::endl;
+    LE_LOG_INFO_T(2s) << "EE pose fine tune - Z advance: "
+                      << ee_pose_fine_tune_.z_advance_
+                      << ", Z clockwise rotate: "
+                      << ee_pose_fine_tune_.z_clockwise_rotate_ << std::endl;
   }
 }
 
@@ -796,10 +801,12 @@ bool VrRobotController::IkGripperTf(const tf2::Transform &target_transform,
   }
 }
 
-tf2::Transform VrRobotController::NormalizeS101GripperTf(
-    const tf2::Transform &target_transform) {
-  // Apply xy reach limit constraint first
+tf2::Transform
+VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
   tf2::Vector3 position = target_transform.getOrigin();
+  tf2::Quaternion rotation = target_transform.getRotation();
+
+  // Apply xy reach limit constraint
   double xy_distance =
       std::sqrt(position.x() * position.x() + position.y() * position.y());
 
@@ -813,6 +820,16 @@ tf2::Transform VrRobotController::NormalizeS101GripperTf(
                 << xy_max_reach_ << std::endl;
   }
 
+  // Return the limited transform
+  tf2::Transform limited_transform;
+  limited_transform.setOrigin(position);
+  limited_transform.setRotation(rotation);
+  return limited_transform;
+}
+
+tf2::Transform VrRobotController::NormalizeS101GripperTf(
+    const tf2::Transform &target_transform) {
+  tf2::Vector3 position = target_transform.getOrigin();
   tf2::Quaternion q = target_transform.getRotation();
 
   constexpr double kEps = 1e-12;
@@ -1011,6 +1028,9 @@ void VrRobotController::ProcessEePose(
 
     crrected_target_transform =
         ApplyTargetTfFineTune(crrected_target_transform);
+
+    // Apply constraints and limits to the target transform after fine tuning
+    crrected_target_transform = LimitTargetTf(crrected_target_transform);
 
     // TODO: delete it Publish crrected_target_transform to TF
     {
