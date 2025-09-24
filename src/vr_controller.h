@@ -34,6 +34,14 @@
 
 namespace lerobot_vr_controller {
 
+// EE pose fine tune structure
+struct EePoseFineTune {
+  double z_advance_;          // Z axis advance control from axes[3]
+  double z_clockwise_rotate_; // Z axis clockwise rotation from axes[2]
+
+  EePoseFineTune() : z_advance_(0.0), z_clockwise_rotate_(0.0) {}
+};
+
 // Constants
 static constexpr const char *kGripperCalSuffix = "_cal";
 static constexpr const char *kVrBaseLinkDummySuffix = "_vr_dummy";
@@ -113,8 +121,13 @@ private:
   // Normalize S101 gripper transform by setting yaw rotation to 0
   tf2::Transform NormalizeS101GripperTf(const tf2::Transform &target_transform);
 
+  // Apply fine tune adjustments to target transform
+  tf2::Transform
+  ApplyTargetTfFineTune(const tf2::Transform &target_transform) const;
+
   // Control joint with end effector poses from local queue
-  void CalculateIk(const std::deque<geometry_msgs::msg::TransformStamped> &local_queue);
+  void ProcessEePose(
+      const std::deque<geometry_msgs::msg::TransformStamped> &local_queue);
 
   // Worker loop that watches the target_ee_pose_queue_ and triggers
   // EePoseIktoJointCmd
@@ -213,6 +226,10 @@ private:
   // Joint filter configurations loaded from YAML
   double filter_alpha_; // 滤波器平滑因子
 
+  // Axes fine tune scale configurations loaded from YAML
+  double z_advance_scale_ = 0.01;
+  double z_clockwise_rotate_scale_ = 0.08;
+
   // Mapping from joint name to VR topic for trigger control
   std::map<std::string, std::string> joint_to_vr_topic_map_;
 
@@ -305,6 +322,11 @@ private:
   // === Home Pose Configuration ===
   // Home pose joint positions loaded from YAML configuration
   JointPositionState home_pose_joint_position_;
+
+  // === EE Pose Fine Tune ===
+  // EE pose fine tune control from VR joystick axes
+  EePoseFineTune ee_pose_fine_tune_;
+  mutable std::shared_mutex ee_pose_fine_tune_mutex_;
 };
 
 } // namespace lerobot_vr_controller

@@ -10,12 +10,17 @@ ik_tolerances:
   orientation_tolerance: 0.02  # Orientation tolerance in radians
   xy_max_reach: 0.6           # Maximum xy plane reach limit in meters
 
-trigger_config:
-# 1 trigger position = 0.0068 radians
-  trigger_to_gripper_scale: 0.0068  # Scale factor for trigger input to gripper position
-  joint_mappings:
-    # {joint name: vr topic}
-    gripper: /vr/controller_right/joy
+joy_config:
+  trigger_config:
+    trigger_to_gripper_scale: 0.0068  # Scale factor for trigger input to gripper position
+    joint_mappings:
+      # {joint name: vr topic}
+      gripper: /vr/controller_right/joy
+  axes_config:
+    # meter unit input from axes
+    z_advance_scale: -0.003
+    # radian unit input from axes
+    z_clockwise_rotate_scale: -0.03
 
 joint_pose:
   home_pose:
