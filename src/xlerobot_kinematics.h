@@ -46,25 +46,19 @@ public:
   /**
    * @brief 初始化运动学求解器
    * @param urdf_param URDF文件内容字符串（为空则使用默认限制）
-   * @param base_link 基座链接名称
-   * @param tip_link 末端链接名称
-   * @param timeout 求解超时时间（秒）
    * @return 初始化是否成功
    */
-  bool
-  Initialize(const std::string &urdf_param = "",
-             const std::string &base_link = "base_link",
-             const std::string &tip_link = "gripper_link",
-             double timeout = 0.005); /**
-                                       * @brief 求解逆运动学
-                                       * @param target_transform 目标变换
-                                       * @param solution 求解结果关节角度
-                                       * @param seed_joints 种子关节角度（可选）
-                                       * @return 求解是否成功
-                                       */
+  bool Initialize(const std::string &urdf_param);
+  /**
+   * @brief 求解逆运动学
+   * @param target_transform 目标变换
+   * @param solution 求解结果关节角度
+   * @param seed_joints 种子关节角度（可选）
+   * @return 求解是否成功
+   */
   bool SolveIK(const tf2::Transform &target_transform,
                std::vector<double> &solution,
-               const std::vector<double> &seed_joints = {});
+               [[maybe_unused]] const std::vector<double> &seed_joints = {});
 
   /**
    * @brief 获取关节数量
@@ -80,12 +74,6 @@ public:
    */
   bool GetJointLimits(std::vector<double> &lower_limits,
                       std::vector<double> &upper_limits) const;
-
-  /**
-   * @brief 设置求解超时时间
-   * @param timeout 超时时间（秒）
-   */
-  void SetTimeout(double timeout);
 
   /**
    * @brief 检查是否已初始化
@@ -151,6 +139,12 @@ private:
   void SetDefaultJointLimits();
 
   /**
+   * @brief 从URDF中解析机械臂结构参数
+   * @return 解析是否成功
+   */
+  bool ParseKinematicsParameters();
+
+  /**
    * @brief 极坐标逆运动学核心算法
    * @param target_transform 目标变换
    * @param solution 求解结果关节角度
@@ -163,45 +157,37 @@ private:
    * @brief 解析求解垂直平面2D位置 - 使用余弦定理
    * @param r 径向距离
    * @param z 垂直高度
-   * @param joint2 第2关节角度（输出）
-   * @param joint3 第3关节角度（输出）
+   * @param shoulder_lift_angle 肩部抬升角度（输出）
+   * @param elbow_flex_angle 肘部弯曲角度（输出）
    * @return 求解是否成功
    */
-  bool SolveVerticalPlane2D(double r, double z, double &joint2, double &joint3);
+  bool SolveVerticalPlane2D(double r, double z, double &shoulder_lift_angle,
+                            double &elbow_flex_angle);
 
   /**
-   * @brief 计算末端朝向角度
+   * @brief 计算末端执行器朝向角度
    * @param target_transform 目标变换
-   * @param joint2 第2关节角度
-   * @param joint3 第3关节角度
-   * @param joint4 第4关节角度（俯仰，输出）
-   * @param joint5 第5关节角度（横滚，输出）
-   * @return 计算是否成功
+   * @param shoulder_lift_angle 肩部抬升角度
+   * @param elbow_flex_angle 肘部弯曲角度
+   * @return std::pair<double, double> 腕部弯曲角度和滚转角度
    */
-  bool CalculateEndEffectorOrientation(const tf2::Transform &target_transform,
-                                       double joint2, double joint3,
-                                       double &joint4, double &joint5);
+  std::pair<double, double>
+  CalculateEndEffectorOrientation(const tf2::Transform &target_transform,
+                                  double shoulder_lift_angle,
+                                  double elbow_flex_angle);
 
-  // 机械臂结构参数（SO-ARM101，基于URDF实际几何数据）
-  static constexpr double kBaseHeight =
-      0.0624; // 基座高度（base到shoulder_pan）
-  static constexpr double kLink1Length =
-      0.0; // shoulder_pan为旋转关节，无长度偏移
-  static constexpr double kLink2Length =
-      0.11257; // shoulder_lift到elbow_flex距离（upper_arm长度）
-  static constexpr double kLink3Length =
-      0.1349; // elbow_flex到wrist_flex距离（lower_arm长度）
-  static constexpr double kWristOffset = 0.0611; // wrist_flex到wrist_roll距离
-  static constexpr double kGripperOffset =
-      0.0181; // wrist_roll到gripper末端距离
+  // 机械臂结构参数（从URDF动态读取）
+  double base_to_shoulder_pan_height_; // 基座高度（base到shoulder_pan）
+  double shoulder_pan_offset_; // shoulder_pan为旋转关节，无长度偏移
+  double upper_arm_length_; // shoulder_lift到elbow_flex距离（upper_arm长度）
+  double lower_arm_length_; // elbow_flex到wrist_flex距离（lower_arm长度）
+  double wrist_flex_to_roll_offset_;    // wrist_flex到wrist_roll距离
+  double wrist_roll_to_gripper_offset_; // wrist_roll到gripper末端距离
 
   // URDF模型
   std::unique_ptr<urdf::Model> urdf_model_;
 
   // 配置参数
-  std::string base_link_;
-  std::string tip_link_;
-  double timeout_;
   double position_tolerance_;
   double orientation_tolerance_;
 
@@ -209,6 +195,8 @@ private:
   std::vector<std::string> joint_names_;
   std::vector<double> joint_lower_limits_;
   std::vector<double> joint_upper_limits_;
+  std::vector<double>
+      joint_origin_rpy_offsets_; // 每个关节的RPY偏移量（从URDF origin获取）
   std::map<std::string, int> joint_placehold_map_;
   size_t num_joints_;
 
