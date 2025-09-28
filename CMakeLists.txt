@@ -21,6 +21,7 @@ ament_auto_add_executable(${PROJECT_NAME}_node
   src/main.cpp 
   src/vr_controller.cpp 
   src/kinematics.cpp
+  src/trac_ik_kinematics.cpp
   src/joint_motor_convert.cpp
   src/vr_trigger_joint_convert.cpp
   src/robot_control_interface.cpp

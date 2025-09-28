@@ -190,6 +190,31 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
                 << std::endl;
     LE_LOG_INFO << "Using VR world frame: " << vr_world_frame_ << std::endl;
 
+    // Load kinematics solver configurations
+    if (config["kinematics"]) {
+      auto kinematics_config = config["kinematics"];
+
+      kinematics_solver_type_ =
+          kinematics_config["solver_type"].as<std::string>("xlerobot");
+      kinematics_timeout_ = kinematics_config["timeout"].as<double>(0.005);
+
+      LE_LOG_INFO << "Kinematics solver configuration:" << std::endl;
+      LE_LOG_INFO << "  - Solver type: " << kinematics_solver_type_
+                  << std::endl;
+      LE_LOG_INFO << "  - Timeout: " << kinematics_timeout_ << " seconds"
+                  << std::endl;
+    } else {
+      // Use default values if kinematics section is missing
+      kinematics_solver_type_ = "xlerobot";
+      kinematics_timeout_ = 0.005;
+      LE_LOG_INFO << "Kinematics section not found, using defaults:"
+                  << std::endl;
+      LE_LOG_INFO << "  - Solver type: " << kinematics_solver_type_
+                  << std::endl;
+      LE_LOG_INFO << "  - Timeout: " << kinematics_timeout_ << " seconds"
+                  << std::endl;
+    }
+
     // Load IK tolerance configurations
     if (config["ik_tolerances"]) {
       auto tolerance_config = config["ik_tolerances"];
@@ -700,12 +725,18 @@ bool VrRobotController::InitIkSolver() {
   LE_LOG_INFO << "Successfully loaded URDF file: " << urdf_file_path_
               << std::endl;
 
-  // Initialize single IK solver
-  ik_solver_ = std::make_unique<SoArm101Kinematics>();
+  // Initialize IK solver using factory pattern
+  ik_solver_ = KinematicsFactory::CreateKinematics(kinematics_solver_type_);
+  if (!ik_solver_) {
+    LE_LOG_ERROR << "Failed to create IK solver of type: "
+                 << kinematics_solver_type_ << std::endl;
+    return false;
+  }
 
   try {
     // Use gripper_world_frame_ as base_link and tip_link_ as tip_link
-    if (!ik_solver_->Initialize(urdf_string, gripper_world_frame_, tip_link_)) {
+    if (!ik_solver_->Initialize(urdf_string, gripper_world_frame_, tip_link_,
+                                kinematics_timeout_)) {
       LE_LOG_ERROR << "Failed to initialize IK solver for tip link: "
                    << tip_link_ << std::endl;
       ik_solver_.reset();
@@ -715,24 +746,26 @@ bool VrRobotController::InitIkSolver() {
     // Set the tolerances loaded from YAML configuration
     ik_solver_->SetTolerances(position_tolerance_, orientation_tolerance_);
 
-    LE_LOG_INFO << "IK solver initialized successfully for tip link: "
-                << tip_link_ << " with " << ik_solver_->GetNumJoints()
-                << " joints (relaxed precision)" << std::endl;
+    LE_LOG_INFO << "IK solver (type: " << kinematics_solver_type_
+                << ") initialized successfully"
+                << " - Base: " << gripper_world_frame_ << ", Tip: " << tip_link_ << " with "
+                << ik_solver_->GetNumJoints() << " joints" << std::endl;
 
   } catch (const std::exception &e) {
-    LE_LOG_ERROR << "Exception during IK solver initialization for tip link "
-                 << tip_link_ << ": " << e.what() << std::endl;
+    LE_LOG_ERROR << "Exception during IK solver initialization (type: "
+                 << kinematics_solver_type_ << "): " << e.what() << std::endl;
     ik_solver_.reset();
     return false;
   }
 
   if (!ik_solver_) {
-    LE_LOG_ERROR << "Failed to initialize IK solver" << std::endl;
+    LE_LOG_ERROR << "Failed to initialize IK solver (type: "
+                 << kinematics_solver_type_ << ")" << std::endl;
     return false;
   }
 
-  LE_LOG_INFO << "Successfully initialized IK solver for tip link: "
-              << tip_link_ << std::endl;
+  LE_LOG_INFO << "Successfully initialized IK solver (type: "
+              << kinematics_solver_type_ << ")" << std::endl;
 
   // Initialize joint position filters after IK solver is ready
   InitJointFilters();

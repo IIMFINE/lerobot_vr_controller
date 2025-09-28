@@ -71,7 +71,7 @@ def generate_launch_description():
                 "config",
                 "motor",
                 "so101_follower",
-                "motor_calibration.yaml",
+                "motor_calibration.json",
             ]
         ),
         description="Path to the motor calibration file",

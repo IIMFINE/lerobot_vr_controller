@@ -1,14 +1,19 @@
 vr_to_arm_tf:
   #tf link mapping
-  gripper_frame_link: wrist_right
+  wrist_link: wrist_right
 gripper_world_frame: base_link
 vr_world_frame: world_vr
+
+# Kinematics solver configuration
+kinematics:
+  solver_type: "xlerobot"        # Options: "trac_ik", "xlerobot"
+  timeout: 0.005                 # IK solver timeout in seconds (for trac_ik)
 
 # IK solver tolerances configuration
 ik_tolerances:
   position_tolerance: 0.03    # Position tolerance in meters
   orientation_tolerance: 0.02  # Orientation tolerance in radians
-  xy_max_reach: 0.47           # Maximum xy plane reach limit in meters
+  xy_max_reach: 0.30           # Maximum xy plane reach limit in meters
 
 joy_config:
   trigger_config:
