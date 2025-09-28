@@ -15,7 +15,6 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "joint_position_filter.h"
-#include "kinematics.h"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "sensor_msgs/msg/joy.hpp"
@@ -24,6 +23,7 @@
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
+#include "kinematics.h"
 #include "vr_trigger_joint_convert.h"
 #include "yaml-cpp/yaml.h"
 
@@ -226,6 +226,10 @@ private:
   double orientation_tolerance_;
   double xy_max_reach_;
 
+  // Kinematics solver configurations loaded from YAML
+  std::string kinematics_solver_type_;
+  double kinematics_timeout_;
+
   // Joint filter configurations loaded from YAML
   double filter_alpha_; // 滤波器平滑因子
 
@@ -303,7 +307,7 @@ private:
 
   // === Control Components ===
   // IK solver
-  std::unique_ptr<SoArm101Kinematics> ik_solver_;
+  std::unique_ptr<KinematicsInterface> ik_solver_;
 
   // Joint position filters for each joint
   std::map<std::string, std::unique_ptr<JointPositionFilter>> joint_filters_;

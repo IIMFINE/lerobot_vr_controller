@@ -17,6 +17,8 @@
 #include <tf2/LinearMath/Transform.h>
 #include <urdf/model.h>
 
+#include "kinematics.h"
+
 namespace lerobot_vr_controller {
 
 /**
@@ -27,7 +29,7 @@ namespace lerobot_vr_controller {
  * - 有利于任务规划，旋转对称性将搜索空间从3D降至2D
  * - 支持对称策略训练，专注于垂直平面操作
  */
-class XLeRobotKinematics {
+class XLeRobotKinematics : public KinematicsInterface {
 public:
   /**
    * @brief 构造函数
@@ -37,7 +39,7 @@ public:
   /**
    * @brief 析构函数
    */
-  ~XLeRobotKinematics() = default;
+  ~XLeRobotKinematics() override = default;
 
   // 禁用拷贝构造和赋值操作
   XLeRobotKinematics(const XLeRobotKinematics &) = delete;
@@ -46,9 +48,15 @@ public:
   /**
    * @brief 初始化运动学求解器
    * @param urdf_param URDF文件内容字符串（为空则使用默认限制）
+   * @param base_link 基座链接名称（未使用，保持接口一致性）
+   * @param tip_link 末端链接名称（未使用，保持接口一致性） 
+   * @param timeout 求解超时时间（未使用，保持接口一致性）
    * @return 初始化是否成功
    */
-  bool Initialize(const std::string &urdf_param);
+  bool Initialize(const std::string &urdf_param,
+                  [[maybe_unused]] const std::string &base_link = "",
+                  [[maybe_unused]] const std::string &tip_link = "",
+                  [[maybe_unused]] double timeout = 0.0) override;
   /**
    * @brief 求解逆运动学
    * @param target_transform 目标变换
@@ -58,13 +66,13 @@ public:
    */
   bool SolveIK(const tf2::Transform &target_transform,
                std::vector<double> &solution,
-               [[maybe_unused]] const std::vector<double> &seed_joints = {});
+               [[maybe_unused]] const std::vector<double> &seed_joints = {}) override;
 
   /**
    * @brief 获取关节数量
    * @return 关节数量
    */
-  size_t GetNumJoints() const;
+  size_t GetNumJoints() const override;
 
   /**
    * @brief 获取关节限制
@@ -73,25 +81,25 @@ public:
    * @return 获取是否成功
    */
   bool GetJointLimits(std::vector<double> &lower_limits,
-                      std::vector<double> &upper_limits) const;
+                      std::vector<double> &upper_limits) const override;
 
   /**
    * @brief 检查是否已初始化
    * @return 初始化状态
    */
-  bool IsInitialized() const;
+  bool IsInitialized() const override;
 
   /**
    * @brief 获取运动学链信息
    * @return 关节名称列表
    */
-  std::vector<std::string> GetJointNames() const;
+  std::vector<std::string> GetJointNames() const override;
 
   /**
    * @brief 获取关节占位数映射
    * @return 关节名称到其在数组中索引位置的映射
    */
-  std::map<std::string, int> GetJointPlaceholdMap() const;
+  std::map<std::string, int> GetJointPlaceholdMap() const override;
 
   /**
    * @brief 将关节状态对齐到IK求解器的关节顺序
@@ -102,14 +110,14 @@ public:
    */
   bool AlignJointStateToIk(const std::vector<std::string> &joint_names,
                            const std::vector<double> &joint_positions,
-                           std::vector<double> &seed_joints) const;
+                           std::vector<double> &seed_joints) const override;
 
   /**
    * @brief 检查目标位置是否在工作空间内
    * @param target_transform 目标变换
    * @return 是否在工作空间内
    */
-  bool CheckWorkspace(const tf2::Transform &target_transform) const;
+  bool CheckWorkspace(const tf2::Transform &target_transform) const override;
 
 private:
   /**
@@ -139,10 +147,26 @@ private:
   void SetDefaultJointLimits();
 
   /**
+   * @brief 打印所有机械臂长度参数
+   */
+  void PrintArmLengthParameters() const;
+
+  /**
    * @brief 从URDF中解析机械臂结构参数
    * @return 解析是否成功
    */
   bool ParseKinematicsParameters();
+
+  /**
+   * @brief 解析关节限制和RPY偏移量
+   * @return 解析是否成功
+   */
+  bool ParseJointLimitsAndOffsets();
+
+  /**
+   * @brief 解析工作空间参数（min_arm_reach_ 和 max_arm_reach_）
+   */
+  void ParseWorkspaceParameters();
 
   /**
    * @brief 极坐标逆运动学核心算法
@@ -178,11 +202,16 @@ private:
 
   // 机械臂结构参数（从URDF动态读取）
   double base_to_shoulder_pan_height_; // 基座高度（base到shoulder_pan）
+  double base_to_shoulder_lift_height_; // 基座到shoulder_lift的高度
   double shoulder_pan_offset_; // shoulder_pan为旋转关节，无长度偏移
   double upper_arm_length_; // shoulder_lift到elbow_flex距离（upper_arm长度）
   double lower_arm_length_; // elbow_flex到wrist_flex距离（lower_arm长度）
   double wrist_flex_to_roll_offset_;    // wrist_flex到wrist_roll距离
   double wrist_roll_to_gripper_offset_; // wrist_roll到gripper末端距离
+
+  // 工作空间参数
+  double min_arm_reach_; // 最小工作半径
+  double max_arm_reach_; // 最大工作半径
 
   // URDF模型
   std::unique_ptr<urdf::Model> urdf_model_;
