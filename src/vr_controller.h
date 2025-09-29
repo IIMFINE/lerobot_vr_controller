@@ -103,9 +103,7 @@ public:
   // Move all robots to home pose (all joints to 0)
   bool MoveToHomePose();
 
-  bool IsControlRobot() const {
-    return control_robot_flag_ && !should_calibrate_.load();
-  }
+  bool IsControlRobot() const;
 
 private:
   // === IK Solver Functions ===
