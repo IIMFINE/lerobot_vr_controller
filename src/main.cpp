@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
 
   // Robot control configuration paths
   std::string joint_motor_config_path =
-      "config/motor/so101_follower/joint_motor_config.yaml";
+      "config/motor/so101_follower/joint_motor_config.json";
   std::string motor_calibration_path =
       "config/motor/so101_follower/motor_calibration.yaml";
   std::string motor_cmd_topic = "/robot_control/motor_cmd";
