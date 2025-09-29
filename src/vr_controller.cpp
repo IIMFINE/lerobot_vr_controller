@@ -190,6 +190,40 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
                 << std::endl;
     LE_LOG_INFO << "Using VR world frame: " << vr_world_frame_ << std::endl;
 
+    // Load end point frame configuration
+    if (config["end_effector_frame"]) {
+      end_point_frame_ = config["end_effector_frame"].as<std::string>();
+      LE_LOG_INFO << "end_effector_frame: " << end_point_frame_ << std::endl;
+    } else {
+      end_point_frame_ = "gripper_frame_link"; // default fallback
+      LE_LOG_INFO << "Using default end_effector_frame: " << end_point_frame_ << std::endl;
+    }
+
+    // Load kinematics solver configurations
+    if (config["kinematics"]) {
+      auto kinematics_config = config["kinematics"];
+
+      kinematics_solver_type_ =
+          kinematics_config["solver_type"].as<std::string>("xlerobot");
+      kinematics_timeout_ = kinematics_config["timeout"].as<double>(0.005);
+
+      LE_LOG_INFO << "Kinematics solver configuration:" << std::endl;
+      LE_LOG_INFO << "  - Solver type: " << kinematics_solver_type_
+                  << std::endl;
+      LE_LOG_INFO << "  - Timeout: " << kinematics_timeout_ << " seconds"
+                  << std::endl;
+    } else {
+      // Use default values if kinematics section is missing
+      kinematics_solver_type_ = "xlerobot";
+      kinematics_timeout_ = 0.005;
+      LE_LOG_INFO << "Kinematics section not found, using defaults:"
+                  << std::endl;
+      LE_LOG_INFO << "  - Solver type: " << kinematics_solver_type_
+                  << std::endl;
+      LE_LOG_INFO << "  - Timeout: " << kinematics_timeout_ << " seconds"
+                  << std::endl;
+    }
+
     // Load IK tolerance configurations
     if (config["ik_tolerances"]) {
       auto tolerance_config = config["ik_tolerances"];
@@ -216,23 +250,22 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
                     << orientation_tolerance_ << std::endl;
       }
 
-      if (tolerance_config["xy_max_reach"]) {
-        xy_max_reach_ = tolerance_config["xy_max_reach"].as<double>();
-        LE_LOG_INFO << "Loaded xy_max_reach: " << xy_max_reach_ << std::endl;
+      if (tolerance_config["max_reach"]) {
+        max_reach_ = tolerance_config["max_reach"].as<double>();
+        LE_LOG_INFO << "Loaded max_reach: " << max_reach_ << std::endl;
       } else {
-        xy_max_reach_ = 0.5; // default value
-        LE_LOG_INFO << "Using default xy_max_reach: " << xy_max_reach_
-                    << std::endl;
+        max_reach_ = 0.5; // default value
+        LE_LOG_INFO << "Using default max_reach: " << max_reach_ << std::endl;
       }
     } else {
       // Use default values if ik_tolerances section is missing
       position_tolerance_ = 0.01;
       orientation_tolerance_ = 0.5;
-      xy_max_reach_ = 0.5;
+      max_reach_ = 0.5;
       LE_LOG_INFO
           << "ik_tolerances section not found, using defaults - Position: "
           << position_tolerance_ << ", Orientation: " << orientation_tolerance_
-          << ", XY Max Reach: " << xy_max_reach_ << std::endl;
+          << ", XYZ Max Reach: " << max_reach_ << std::endl;
     }
 
     // Load joint filter configurations
@@ -663,14 +696,20 @@ void VrRobotController::JoystickCallback(
   if (msg->axes.size() > kZAdvanceAxis) {
     std::unique_lock<std::shared_mutex> lock(ee_pose_fine_tune_mutex_);
 
-    double z_advance_delta = msg->axes[kZAdvanceAxis] * z_advance_scale_;
+    constexpr double kAxesIgnoreThreshold = 0.1;
 
-    // axes[kZAdvanceAxis] -> z_advance (累积增加/减少)
-    ee_pose_fine_tune_.z_advance_ += z_advance_delta;
+    double z_adv_raw = static_cast<double>(msg->axes[kZAdvanceAxis]);
+    if (std::abs(z_adv_raw) >= kAxesIgnoreThreshold) {
+      ee_pose_fine_tune_.z_advance_ += z_adv_raw * z_advance_scale_;
+    }
 
-    // axes[kZClockwiseRotateAxis] -> z_clockwise_rotate (累积增加/减少)
-    ee_pose_fine_tune_.z_clockwise_rotate_ +=
-        msg->axes[kZClockwiseRotateAxis] * z_clockwise_rotate_scale_;
+    if (msg->axes.size() > kZClockwiseRotateAxis) {
+      double z_cw_raw = static_cast<double>(msg->axes[kZClockwiseRotateAxis]);
+      if (std::abs(z_cw_raw) >= kAxesIgnoreThreshold) {
+        ee_pose_fine_tune_.z_clockwise_rotate_ +=
+            z_cw_raw * z_clockwise_rotate_scale_;
+      }
+    }
 
     LE_LOG_INFO_T(2s) << "EE pose fine tune - Z advance: "
                       << ee_pose_fine_tune_.z_advance_
@@ -700,12 +739,18 @@ bool VrRobotController::InitIkSolver() {
   LE_LOG_INFO << "Successfully loaded URDF file: " << urdf_file_path_
               << std::endl;
 
-  // Initialize single IK solver
-  ik_solver_ = std::make_unique<SoArm101Kinematics>();
+  // Initialize IK solver using factory pattern
+  ik_solver_ = KinematicsFactory::CreateKinematics(kinematics_solver_type_);
+  if (!ik_solver_) {
+    LE_LOG_ERROR << "Failed to create IK solver of type: "
+                 << kinematics_solver_type_ << std::endl;
+    return false;
+  }
 
   try {
     // Use gripper_world_frame_ as base_link and tip_link_ as tip_link
-    if (!ik_solver_->Initialize(urdf_string, gripper_world_frame_, tip_link_)) {
+    if (!ik_solver_->Initialize(urdf_string, gripper_world_frame_, tip_link_,
+                                kinematics_timeout_)) {
       LE_LOG_ERROR << "Failed to initialize IK solver for tip link: "
                    << tip_link_ << std::endl;
       ik_solver_.reset();
@@ -714,25 +759,33 @@ bool VrRobotController::InitIkSolver() {
 
     // Set the tolerances loaded from YAML configuration
     ik_solver_->SetTolerances(position_tolerance_, orientation_tolerance_);
+    
+    // Set the end point frame loaded from YAML configuration
+    if (!end_point_frame_.empty()) {
+      ik_solver_->SetEndEffectorFrame(end_point_frame_);
+      LE_LOG_INFO << "End effector frame set to: " << end_point_frame_ << std::endl;
+    }
 
-    LE_LOG_INFO << "IK solver initialized successfully for tip link: "
-                << tip_link_ << " with " << ik_solver_->GetNumJoints()
-                << " joints (relaxed precision)" << std::endl;
+    LE_LOG_INFO << "IK solver (type: " << kinematics_solver_type_
+                << ") initialized successfully"
+                << " - Base: " << gripper_world_frame_ << ", Tip: " << tip_link_ << " with "
+                << ik_solver_->GetNumJoints() << " joints" << std::endl;
 
   } catch (const std::exception &e) {
-    LE_LOG_ERROR << "Exception during IK solver initialization for tip link "
-                 << tip_link_ << ": " << e.what() << std::endl;
+    LE_LOG_ERROR << "Exception during IK solver initialization (type: "
+                 << kinematics_solver_type_ << "): " << e.what() << std::endl;
     ik_solver_.reset();
     return false;
   }
 
   if (!ik_solver_) {
-    LE_LOG_ERROR << "Failed to initialize IK solver" << std::endl;
+    LE_LOG_ERROR << "Failed to initialize IK solver (type: "
+                 << kinematics_solver_type_ << ")" << std::endl;
     return false;
   }
 
-  LE_LOG_INFO << "Successfully initialized IK solver for tip link: "
-              << tip_link_ << std::endl;
+  LE_LOG_INFO << "Successfully initialized IK solver (type: "
+              << kinematics_solver_type_ << ")" << std::endl;
 
   // Initialize joint position filters after IK solver is ready
   InitJointFilters();
@@ -806,18 +859,20 @@ VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
   tf2::Vector3 position = target_transform.getOrigin();
   tf2::Quaternion rotation = target_transform.getRotation();
 
-  // Apply xy reach limit constraint
-  double xy_distance =
-      std::sqrt(position.x() * position.x() + position.y() * position.y());
+  // Apply xyz reach limit constraint
+  double xyz_distance =
+      std::sqrt(position.x() * position.x() + position.y() * position.y() +
+                position.z() * position.z());
 
-  if (xy_distance > xy_max_reach_) {
-    // Scale down the xy position to fit within the reach limit
-    double scale_factor = xy_max_reach_ / xy_distance;
+  if (xyz_distance > max_reach_) {
+    // Scale down the xyz position to fit within the reach limit
+    double scale_factor = max_reach_ / xyz_distance;
     position.setX(position.x() * scale_factor);
     position.setY(position.y() * scale_factor);
+    position.setZ(position.z() * scale_factor);
 
-    LE_LOG_INFO << "Limited xy reach from " << xy_distance << " to "
-                << xy_max_reach_ << std::endl;
+    LE_LOG_INFO << "Limited xyz reach from " << xyz_distance << " to "
+                << max_reach_ << std::endl;
   }
 
   // Return the limited transform
