@@ -1495,6 +1495,10 @@ bool VrRobotController::MoveToHomePose() {
   return all_success;
 }
 
+bool VrRobotController::IsControlRobot() const {
+  return control_robot_flag_ && !should_calibrate_.load();
+}
+
 sensor_msgs::msg::JointState VrRobotController::ConvertToRosJointState(
     const JointPositionState &joint_position_state) const {
   sensor_msgs::msg::JointState joint_state_msg;
