@@ -26,6 +26,19 @@ inline double GetRoll(const tf2::Transform &transform) {
   return roll;
 }
 
+inline double GetYaw(const tf2::Transform &transform) {
+  const tf2::Quaternion q = transform.getRotation();
+  if (q.length2() <= std::numeric_limits<double>::epsilon()) {
+    return 0.0;
+  }
+
+  double roll = 0.0;
+  double pitch = 0.0;
+  double yaw = 0.0;
+  tf2::getEulerYPR(q, yaw, pitch, roll);
+  return yaw;
+}
+
 inline double GetPitch(const tf2::Transform &transform) {
   const tf2::Quaternion q = transform.getRotation();
   if (q.length2() <= std::numeric_limits<double>::epsilon()) {

@@ -30,7 +30,7 @@ joy_config:
       gripper: /vr/controller_right/joy
   axes_config:
     # meter unit input from axes
-    z_advance_scale: 0.0015
+    z_advance_scale: -0.0015
     # radian unit input from axes
     z_clockwise_rotate_scale: -0.03
 
