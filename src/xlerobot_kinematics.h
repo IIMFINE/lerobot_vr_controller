@@ -14,6 +14,8 @@
 #include <kdl/jntarray.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sstream>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Transform.h>
 #include <urdf/model.h>
 
@@ -57,6 +59,7 @@ public:
                   [[maybe_unused]] const std::string &base_link = "",
                   [[maybe_unused]] const std::string &tip_link = "",
                   [[maybe_unused]] double timeout = 0.0) override;
+
   /**
    * @brief 求解逆运动学
    * @param target_transform 目标变换
@@ -169,6 +172,23 @@ private:
   void ParseWorkspaceParameters();
 
   /**
+   * @brief 解析tip link在初始姿态下的方向
+   * @param base_link 基座链接名称
+   * @param tip_link 末端链接名称
+   * @return 解析是否成功
+   */
+  bool ParseTipLinkInitialOrientation(const std::string &base_link,
+                                      const std::string &tip_link);
+
+  /**
+   * @brief 解析末端执行器在初始姿态下的方向
+   * 使用基类中的 end_effector_frame_ 作为目标 link 名称
+   * @param base_link 基座链接名称（可选，用于限定累积范围）
+   * @return 解析是否成功
+   */
+  bool ParseEeFrameInitialOrientation(const std::string &base_link);
+
+  /**
    * @brief 极坐标逆运动学核心算法
    * @param target_transform 目标变换
    * @param solution 求解结果关节角度
@@ -228,6 +248,9 @@ private:
       joint_origin_rpy_offsets_; // 每个关节的RPY偏移量（从URDF origin获取）
   std::map<std::string, int> joint_placehold_map_;
   size_t num_joints_;
+
+  tf2::Transform tip_link_initial_transform_;
+  tf2::Transform ee_link_initial_transform_;
 
   // 初始化状态
   bool initialized_;

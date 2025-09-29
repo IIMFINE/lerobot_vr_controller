@@ -2,7 +2,9 @@
 
 #include <functional>
 #include <iomanip>
+#include <limits>
 
+#include "common_math.h"
 #include "log.h"
 
 namespace lerobot_vr_controller {
@@ -17,6 +19,8 @@ XLeRobotKinematics::XLeRobotKinematics()
       initialized_(false) {
   // 初始化关节RPY偏移量（默认值，将从URDF更新）
   joint_origin_rpy_offsets_.resize(5, 0.0);
+  tip_link_initial_transform_.setIdentity();
+  ee_link_initial_transform_.setIdentity();
 }
 
 bool XLeRobotKinematics::Initialize(
@@ -60,8 +64,21 @@ bool XLeRobotKinematics::Initialize(
                  << std::endl;
   }
 
+  // 同时解析 tip link 和 end effector 的初始朝向（它们不是同一个东西）
+  if (!ParseTipLinkInitialOrientation(base_link, tip_link)) {
+    LE_LOG_ERROR << "Failed to parse tip link initial orientation for '"
+                 << tip_link << "'" << std::endl;
+  }
+
+  if (!end_effector_frame_.empty()) {
+    if (!ParseEeFrameInitialOrientation(base_link)) {
+      LE_LOG_ERROR << "Failed to parse end effector initial orientation for '"
+                   << end_effector_frame_ << "'" << std::endl;
+    }
+  }
+
   initialized_ = true;
-  
+
   // 打印所有机械臂长度参数
   PrintArmLengthParameters();
   
@@ -93,15 +110,13 @@ bool XLeRobotKinematics::SolvePolarIK(const tf2::Transform &target_transform,
   // 步骤1：计算第0关节角度（极坐标旋转角）
   // 考虑URDF中shoulder_pan的origin偏移
   // 与关节的正方向定义一致，添加负号
-  double shoulder_pan_angle =
-      -(std::atan2(y, x) - joint_origin_rpy_offsets_[0]);
-  LE_LOG_INFO << "pan " << shoulder_pan_angle << std::endl;
+  double shoulder_pan_angle = -std::atan2(y, x);
 
   // 步骤2：计算垂直平面内的径向距离
   double r = std::sqrt(x * x + y * y);
-  double z_relative = z - base_to_shoulder_pan_height_; // 相对于基座的高度
+  double z_relative = z - base_to_shoulder_lift_height_; // 相对于基座的高度
 
-  // 步骤3：使用余弦定理求解第2、3关节角度，考虑URDF偏移
+  // 步骤3：使用余弦定理求解第1、2关节角度，考虑URDF偏移
   double shoulder_lift_angle, elbow_flex_angle;
   if (!SolveVerticalPlane2D(r, z_relative, shoulder_lift_angle,
                             elbow_flex_angle)) {
@@ -112,20 +127,15 @@ bool XLeRobotKinematics::SolvePolarIK(const tf2::Transform &target_transform,
 
   // 步骤4：计算末端朝向角度，考虑URDF偏移
   auto [wrist_flex_angle, wrist_roll_angle] = CalculateEndEffectorOrientation(
-      target_transform, shoulder_lift_angle + joint_origin_rpy_offsets_[1],
-      joint_origin_rpy_offsets_[2] - elbow_flex_angle);
-
-  // 应用腕部关节的URDF偏移
-  wrist_flex_angle -= joint_origin_rpy_offsets_[3];
-  wrist_roll_angle -= joint_origin_rpy_offsets_[4];
+      target_transform, shoulder_lift_angle, elbow_flex_angle);
 
   // 步骤5：直接使用计算得到的关节位置（已经考虑了URDF偏移）
   // 这样确保关节位置为0时，机械臂呈现URDF中定义的几何配置
-  solution[0] = shoulder_pan_angle;  // shoulder_pan
-  solution[1] = shoulder_lift_angle; // shoulder_lift
-  solution[2] = elbow_flex_angle;    // elbow_flex
-  solution[3] = wrist_flex_angle;    // wrist_flex
-  solution[4] = wrist_roll_angle;    // wrist_roll
+  solution[0] = shoulder_pan_angle + joint_origin_rpy_offsets_[0];
+  solution[1] = shoulder_lift_angle - joint_origin_rpy_offsets_[1];
+  solution[2] = joint_origin_rpy_offsets_[2] - elbow_flex_angle;
+  solution[3] = wrist_flex_angle - joint_origin_rpy_offsets_[3];
+  solution[4] = wrist_roll_angle - joint_origin_rpy_offsets_[4];
 
   // 仅使用URDF的joint_origin_rpy_offsets_进行求解，不再额外添加输出偏移
 
@@ -165,19 +175,15 @@ bool XLeRobotKinematics::SolveVerticalPlane2D(double r, double z,
   elbow_flex_angle = std::acos(cos_elbow_flex);
 
   // 计算肩部抬升角度
-  double alpha = std::atan2(z, r); // 目标点相对于水平面的角度
+  double alpha = std::atan2(r, z); // 目标点相对于水平面的角度
   double beta = std::acos((upper_arm_length_ * upper_arm_length_ +
                            target_distance * target_distance -
                            lower_arm_length_ * lower_arm_length_) /
                           (2 * upper_arm_length_ * target_distance));
 
   // 根据肘部弯曲角度决定肩部抬升角度的计算方式
-  shoulder_lift_angle =
-      (elbow_flex_angle > M_PI_2) ? (beta - alpha) : (alpha - beta);
-
-  // 应用URDF origin偏移
-  shoulder_lift_angle -= joint_origin_rpy_offsets_[1];
-  elbow_flex_angle = joint_origin_rpy_offsets_[2] - elbow_flex_angle;
+  // 保证 shoulder_lift_angle 为正数
+  shoulder_lift_angle = alpha - beta;
 
   return true;
 }
@@ -187,18 +193,25 @@ std::pair<double, double> XLeRobotKinematics::CalculateEndEffectorOrientation(
     double elbow_flex_angle) {
 
   // 获取目标方向
-  tf2::Matrix3x3 target_rotation(target_transform.getRotation());
-  double target_roll, target_pitch, target_yaw;
-  target_rotation.getRPY(target_roll, target_pitch, target_yaw);
+  const double target_pitch =
+      GetIntersectionAngle(target_transform, Plane::kXY, Axis::kZ);
 
-  // 计算前两个关节造成的累积俯仰角
-  double accumulated_pitch = shoulder_lift_angle + elbow_flex_angle;
+  // 计算前两个关节造成的累积俯仰角，
+  // 当 lower_arm_link 的朝向向下时，accumulated_pitch是负数，朝上则是正数。
+  double accumulated_pitch = elbow_flex_angle - shoulder_lift_angle - M_PI_2;
 
   // 第3关节直接对应俯仰角，需要补偿前面关节的影响
-  double wrist_flex_angle = target_pitch - accumulated_pitch;
+  // 第3关节，wrist_flex 向下是正关节角度，向上是负关节角度
+  //而 lower_arm_link 向下是负数，target_pitch
+  //向下也是负数，所以要取反来获取正确的 wrist_flex 关节角度
+  // double wrist_flex_angle = target_pitch + accumulated_pitch;
+  double wrist_flex_angle = accumulated_pitch - target_pitch;
 
-  // 第4关节直接对应横滚角
-  double wrist_roll_angle = target_roll;
+  LE_LOG_INFO << "pan wrist_flex_angle " << wrist_flex_angle << " target_pitch "
+              << target_pitch << std::endl;
+
+  // 第4关节计算
+  double wrist_roll_angle = GetRoll(target_transform);
 
   return std::make_pair(wrist_flex_angle, wrist_roll_angle);
 }
@@ -229,7 +242,7 @@ bool XLeRobotKinematics::CheckWorkspace(
   double z = target_pos.getZ();
 
   double r = std::sqrt(x * x + y * y);
-  double z_relative = z - base_to_shoulder_pan_height_;
+  double z_relative = z - base_to_shoulder_lift_height_;
   double target_distance = std::sqrt(r * r + z_relative * z_relative);
 
   return (target_distance >= min_arm_reach_ &&
@@ -340,6 +353,9 @@ void XLeRobotKinematics::SetDefaultJointLimits() {
   // wrist_roll: -2.74385 to 2.84121
   joint_lower_limits_ = {-1.91986, -1.74533, -1.69, -1.65806, -2.74385};
   joint_upper_limits_ = {1.91986, 1.74533, 1.69, 1.65806, 2.84121};
+
+  // Initialize tip link transform
+  tip_link_initial_transform_.setIdentity();
 
   // 设置默认关节RPY偏移量（基于URDF分析和关节轴向得出的默认值）
   // 顺序必须与joint_names_一致：["shoulder_pan", "shoulder_lift", "elbow_flex",
@@ -539,6 +555,149 @@ bool XLeRobotKinematics::ParseKinematicsParameters() {
                  << e.what() << std::endl;
     return false;
   }
+}
+
+bool XLeRobotKinematics::ParseTipLinkInitialOrientation(
+    const std::string &base_link, const std::string &tip_link) {
+  tip_link_initial_transform_.setIdentity();
+
+  if (!urdf_model_) {
+    LE_LOG_ERROR << "URDF model not loaded" << std::endl;
+    return false;
+  }
+
+  if (tip_link.empty()) {
+    LE_LOG_ERROR << "Tip link name is empty" << std::endl;
+    return false;
+  }
+
+  auto link = urdf_model_->getLink(tip_link);
+  if (!link) {
+    LE_LOG_ERROR << "Tip link '" << tip_link << "' not found in URDF"
+                 << std::endl;
+    return false;
+  }
+
+  tf2::Quaternion accumulated_orientation(0.0, 0.0, 0.0, 1.0);
+
+  while (link && link->parent_joint) {
+    const auto joint = link->parent_joint;
+    if (!joint) {
+      break;
+    }
+
+    const auto &origin_rotation =
+        joint->parent_to_joint_origin_transform.rotation;
+    tf2::Quaternion joint_orientation(origin_rotation.x, origin_rotation.y,
+                                      origin_rotation.z, origin_rotation.w);
+    accumulated_orientation = joint_orientation * accumulated_orientation;
+
+    const std::string &parent_link_name = joint->parent_link_name;
+
+    if (!base_link.empty() && parent_link_name == base_link) {
+      break;
+    }
+
+    link = urdf_model_->getLink(parent_link_name);
+    if (!link) {
+      if (!base_link.empty()) {
+        LE_LOG_ERROR << "Parent link '" << parent_link_name
+                     << "' not found while parsing tip link orientation"
+                     << std::endl;
+        return false;
+      }
+      break;
+    }
+  }
+
+  accumulated_orientation.normalize();
+
+  tip_link_initial_transform_.setOrigin(tf2::Vector3(0.0, 0.0, 0.0));
+  tip_link_initial_transform_.setRotation(accumulated_orientation);
+
+  double initial_roll = 0.0;
+  double initial_pitch = 0.0;
+  double initial_yaw = 0.0;
+  tf2::Matrix3x3(accumulated_orientation)
+      .getRPY(initial_roll, initial_pitch, initial_yaw);
+
+  LE_LOG_INFO << "Tip link initial orientation (RPY): roll=" << std::fixed
+              << std::setprecision(5) << initial_roll
+              << ", pitch=" << initial_pitch << ", yaw=" << initial_yaw
+              << std::endl;
+
+  return true;
+}
+
+bool XLeRobotKinematics::ParseEeFrameInitialOrientation(
+    const std::string &base_link) {
+  ee_link_initial_transform_.setIdentity();
+
+  if (end_effector_frame_.empty()) {
+    LE_LOG_ERROR << "end_effector_frame_ is empty" << std::endl;
+    return false;
+  }
+
+  if (!urdf_model_) {
+    LE_LOG_ERROR << "URDF model not loaded" << std::endl;
+    return false;
+  }
+
+  auto link = urdf_model_->getLink(end_effector_frame_);
+  if (!link) {
+    LE_LOG_ERROR << "End effector link '" << end_effector_frame_
+                 << "' not found in URDF" << std::endl;
+    return false;
+  }
+
+  tf2::Quaternion accumulated_orientation(0.0, 0.0, 0.0, 1.0);
+
+  while (link && link->parent_joint) {
+    const auto joint = link->parent_joint;
+    if (!joint)
+      break;
+
+    const auto &origin_rotation =
+        joint->parent_to_joint_origin_transform.rotation;
+    tf2::Quaternion joint_orientation(origin_rotation.x, origin_rotation.y,
+                                      origin_rotation.z, origin_rotation.w);
+    accumulated_orientation = joint_orientation * accumulated_orientation;
+
+    const std::string &parent_link_name = joint->parent_link_name;
+    if (!base_link.empty() && parent_link_name == base_link)
+      break;
+
+    link = urdf_model_->getLink(parent_link_name);
+    if (!link) {
+      if (!base_link.empty()) {
+        LE_LOG_ERROR << "Parent link '" << parent_link_name
+                     << "' not found while parsing EE orientation" << std::endl;
+        return false;
+      }
+      break;
+    }
+  }
+
+  if (accumulated_orientation.length2() <=
+      std::numeric_limits<double>::epsilon()) {
+    accumulated_orientation.setValue(0.0, 0.0, 0.0, 1.0);
+  }
+  accumulated_orientation.normalize();
+
+  ee_link_initial_transform_.setOrigin(tf2::Vector3(0.0, 0.0, 0.0));
+  ee_link_initial_transform_.setRotation(accumulated_orientation);
+
+  double initial_roll = 0.0;
+  double initial_pitch = 0.0;
+  double initial_yaw = 0.0;
+  tf2::Matrix3x3(accumulated_orientation)
+      .getRPY(initial_roll, initial_pitch, initial_yaw);
+  LE_LOG_INFO << "EE initial orientation (RPY): roll=" << std::fixed
+              << std::setprecision(5) << initial_roll
+              << ", pitch=" << initial_pitch << ", yaw=" << initial_yaw
+              << std::endl;
+
+  return true;
 }
 
 bool XLeRobotKinematics::ParseJointLimitsAndOffsets() {

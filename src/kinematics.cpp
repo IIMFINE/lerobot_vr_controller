@@ -44,4 +44,8 @@ std::vector<std::string> KinematicsFactory::GetAvailableTypes() {
   return {"trac_ik", "xlerobot"};
 }
 
+void KinematicsInterface::SetEndEffectorFrame(const std::string &end_effector_frame) {
+  end_effector_frame_ = end_effector_frame;
+}
+
 } // namespace lerobot_vr_controller
