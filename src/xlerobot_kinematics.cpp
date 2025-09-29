@@ -1,5 +1,6 @@
 #include "xlerobot_kinematics.h"
 
+#include <algorithm>
 #include <functional>
 #include <iomanip>
 #include <limits>
@@ -204,14 +205,19 @@ std::pair<double, double> XLeRobotKinematics::CalculateEndEffectorOrientation(
   // 第3关节，wrist_flex 向下是正关节角度，向上是负关节角度
   //而 lower_arm_link 向下是负数，target_pitch
   //向下也是负数，所以要取反来获取正确的 wrist_flex 关节角度
-  // double wrist_flex_angle = target_pitch + accumulated_pitch;
   double wrist_flex_angle = accumulated_pitch - target_pitch;
 
-  LE_LOG_INFO << "pan wrist_flex_angle " << wrist_flex_angle << " target_pitch "
-              << target_pitch << std::endl;
-
   // 第4关节计算
-  double wrist_roll_angle = GetRoll(target_transform);
+  double wrist_roll_angle = GetYaw(target_transform);
+
+  // 限制wrist_roll_angle在关节限制范围内
+  constexpr size_t kWristRollIndex = 4;
+  if (kWristRollIndex < joint_lower_limits_.size() &&
+      kWristRollIndex < joint_upper_limits_.size()) {
+    wrist_roll_angle =
+        std::clamp(wrist_roll_angle, joint_lower_limits_[kWristRollIndex],
+                   joint_upper_limits_[kWristRollIndex]);
+  }
 
   return std::make_pair(wrist_flex_angle, wrist_roll_angle);
 }

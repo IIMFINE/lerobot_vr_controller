@@ -697,14 +697,20 @@ void VrRobotController::JoystickCallback(
   if (msg->axes.size() > kZAdvanceAxis) {
     std::unique_lock<std::shared_mutex> lock(ee_pose_fine_tune_mutex_);
 
-    double z_advance_delta = msg->axes[kZAdvanceAxis] * z_advance_scale_;
+    constexpr double kAxesIgnoreThreshold = 0.1;
 
-    // axes[kZAdvanceAxis] -> z_advance (累积增加/减少)
-    ee_pose_fine_tune_.z_advance_ += z_advance_delta;
+    double z_adv_raw = static_cast<double>(msg->axes[kZAdvanceAxis]);
+    if (std::abs(z_adv_raw) >= kAxesIgnoreThreshold) {
+      ee_pose_fine_tune_.z_advance_ += z_adv_raw * z_advance_scale_;
+    }
 
-    // axes[kZClockwiseRotateAxis] -> z_clockwise_rotate (累积增加/减少)
-    ee_pose_fine_tune_.z_clockwise_rotate_ +=
-        msg->axes[kZClockwiseRotateAxis] * z_clockwise_rotate_scale_;
+    if (msg->axes.size() > kZClockwiseRotateAxis) {
+      double z_cw_raw = static_cast<double>(msg->axes[kZClockwiseRotateAxis]);
+      if (std::abs(z_cw_raw) >= kAxesIgnoreThreshold) {
+        ee_pose_fine_tune_.z_clockwise_rotate_ +=
+            z_cw_raw * z_clockwise_rotate_scale_;
+      }
+    }
 
     LE_LOG_INFO_T(2s) << "EE pose fine tune - Z advance: "
                       << ee_pose_fine_tune_.z_advance_
