@@ -227,7 +227,7 @@ private:
   // IK tolerance configurations loaded from YAML
   double position_tolerance_;
   double orientation_tolerance_;
-  double xy_max_reach_;
+  double max_reach_;
 
   // Kinematics solver configurations loaded from YAML
   std::string kinematics_solver_type_;

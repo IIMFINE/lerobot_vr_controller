@@ -250,23 +250,22 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
                     << orientation_tolerance_ << std::endl;
       }
 
-      if (tolerance_config["xy_max_reach"]) {
-        xy_max_reach_ = tolerance_config["xy_max_reach"].as<double>();
-        LE_LOG_INFO << "Loaded xy_max_reach: " << xy_max_reach_ << std::endl;
+      if (tolerance_config["max_reach"]) {
+        max_reach_ = tolerance_config["max_reach"].as<double>();
+        LE_LOG_INFO << "Loaded max_reach: " << max_reach_ << std::endl;
       } else {
-        xy_max_reach_ = 0.5; // default value
-        LE_LOG_INFO << "Using default xy_max_reach: " << xy_max_reach_
-                    << std::endl;
+        max_reach_ = 0.5; // default value
+        LE_LOG_INFO << "Using default max_reach: " << max_reach_ << std::endl;
       }
     } else {
       // Use default values if ik_tolerances section is missing
       position_tolerance_ = 0.01;
       orientation_tolerance_ = 0.5;
-      xy_max_reach_ = 0.5;
+      max_reach_ = 0.5;
       LE_LOG_INFO
           << "ik_tolerances section not found, using defaults - Position: "
           << position_tolerance_ << ", Orientation: " << orientation_tolerance_
-          << ", XY Max Reach: " << xy_max_reach_ << std::endl;
+          << ", XYZ Max Reach: " << max_reach_ << std::endl;
     }
 
     // Load joint filter configurations
@@ -860,18 +859,20 @@ VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
   tf2::Vector3 position = target_transform.getOrigin();
   tf2::Quaternion rotation = target_transform.getRotation();
 
-  // Apply xy reach limit constraint
-  double xy_distance =
-      std::sqrt(position.x() * position.x() + position.y() * position.y());
+  // Apply xyz reach limit constraint
+  double xyz_distance =
+      std::sqrt(position.x() * position.x() + position.y() * position.y() +
+                position.z() * position.z());
 
-  if (xy_distance > xy_max_reach_) {
-    // Scale down the xy position to fit within the reach limit
-    double scale_factor = xy_max_reach_ / xy_distance;
+  if (xyz_distance > max_reach_) {
+    // Scale down the xyz position to fit within the reach limit
+    double scale_factor = max_reach_ / xyz_distance;
     position.setX(position.x() * scale_factor);
     position.setY(position.y() * scale_factor);
+    position.setZ(position.z() * scale_factor);
 
-    LE_LOG_INFO << "Limited xy reach from " << xy_distance << " to "
-                << xy_max_reach_ << std::endl;
+    LE_LOG_INFO << "Limited xyz reach from " << xyz_distance << " to "
+                << max_reach_ << std::endl;
   }
 
   // Return the limited transform
