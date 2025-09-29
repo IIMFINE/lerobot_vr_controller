@@ -19,7 +19,7 @@ ik_tolerances:
   # Orientation tolerance in radians
   orientation_tolerance: 0.02
   # Maximum xy plane reach limit in meters
-  xy_max_reach: 0.30
+  max_reach: 0.30
 
 joy_config:
   trigger_config:

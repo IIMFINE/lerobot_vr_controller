@@ -201,24 +201,24 @@ private:
    * @brief 解析求解垂直平面2D位置 - 使用余弦定理
    * @param r 径向距离
    * @param z 垂直高度
-   * @param shoulder_lift_angle 肩部抬升角度（输出）
-   * @param elbow_flex_angle 肘部弯曲角度（输出）
+   * @param shoulder_lift_radian 肩部抬升角度（输出）
+   * @param elbow_flex_radian 肘部弯曲角度（输出）
    * @return 求解是否成功
    */
-  bool SolveVerticalPlane2D(double r, double z, double &shoulder_lift_angle,
-                            double &elbow_flex_angle);
+  bool SolveVerticalPlane2D(double r, double z, double &shoulder_lift_radian,
+                            double &elbow_flex_radian);
 
   /**
    * @brief 计算末端执行器朝向角度
    * @param target_transform 目标变换
-   * @param shoulder_lift_angle 肩部抬升角度
-   * @param elbow_flex_angle 肘部弯曲角度
+   * @param shoulder_lift_radian 肩部抬升角度
+   * @param elbow_flex_radian 肘部弯曲角度
    * @return std::pair<double, double> 腕部弯曲角度和滚转角度
    */
   std::pair<double, double>
   CalculateEndEffectorOrientation(const tf2::Transform &target_transform,
-                                  double shoulder_lift_angle,
-                                  double elbow_flex_angle);
+                                  double shoulder_lift_radian,
+                                  double elbow_flex_radian);
 
   // 机械臂结构参数（从URDF动态读取）
   double base_to_shoulder_pan_height_; // 基座高度（base到shoulder_pan）

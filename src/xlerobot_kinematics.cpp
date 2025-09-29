@@ -111,32 +111,32 @@ bool XLeRobotKinematics::SolvePolarIK(const tf2::Transform &target_transform,
   // 步骤1：计算第0关节角度（极坐标旋转角）
   // 考虑URDF中shoulder_pan的origin偏移
   // 与关节的正方向定义一致，添加负号
-  double shoulder_pan_angle = -std::atan2(y, x);
+  double shoulder_pan_radian = -std::atan2(y, x);
 
   // 步骤2：计算垂直平面内的径向距离
   double r = std::sqrt(x * x + y * y);
   double z_relative = z - base_to_shoulder_lift_height_; // 相对于基座的高度
 
   // 步骤3：使用余弦定理求解第1、2关节角度，考虑URDF偏移
-  double shoulder_lift_angle, elbow_flex_angle;
-  if (!SolveVerticalPlane2D(r, z_relative, shoulder_lift_angle,
-                            elbow_flex_angle)) {
+  double shoulder_lift_radian, elbow_flex_radian;
+  if (!SolveVerticalPlane2D(r, z_relative, shoulder_lift_radian,
+                            elbow_flex_radian)) {
     LE_LOG_ERROR << "Cannot reach target position (r=" << r
                  << ", z=" << z_relative << ")" << std::endl;
     return false;
   }
 
   // 步骤4：计算末端朝向角度，考虑URDF偏移
-  auto [wrist_flex_angle, wrist_roll_angle] = CalculateEndEffectorOrientation(
-      target_transform, shoulder_lift_angle, elbow_flex_angle);
+  auto [wrist_flex_radian, wrist_roll_radian] = CalculateEndEffectorOrientation(
+      target_transform, shoulder_lift_radian, elbow_flex_radian);
 
   // 步骤5：直接使用计算得到的关节位置（已经考虑了URDF偏移）
   // 这样确保关节位置为0时，机械臂呈现URDF中定义的几何配置
-  solution[0] = shoulder_pan_angle + joint_origin_rpy_offsets_[0];
-  solution[1] = shoulder_lift_angle - joint_origin_rpy_offsets_[1];
-  solution[2] = joint_origin_rpy_offsets_[2] - elbow_flex_angle;
-  solution[3] = wrist_flex_angle - joint_origin_rpy_offsets_[3];
-  solution[4] = wrist_roll_angle - joint_origin_rpy_offsets_[4];
+  solution[0] = shoulder_pan_radian + joint_origin_rpy_offsets_[0];
+  solution[1] = shoulder_lift_radian - joint_origin_rpy_offsets_[1];
+  solution[2] = joint_origin_rpy_offsets_[2] - elbow_flex_radian;
+  solution[3] = wrist_flex_radian - joint_origin_rpy_offsets_[3];
+  solution[4] = wrist_roll_radian - joint_origin_rpy_offsets_[4];
 
   // 仅使用URDF的joint_origin_rpy_offsets_进行求解，不再额外添加输出偏移
 
@@ -153,8 +153,8 @@ bool XLeRobotKinematics::SolvePolarIK(const tf2::Transform &target_transform,
 }
 
 bool XLeRobotKinematics::SolveVerticalPlane2D(double r, double z,
-                                              double &shoulder_lift_angle,
-                                              double &elbow_flex_angle) {
+                                              double &shoulder_lift_radian,
+                                              double &elbow_flex_radian) {
   // 计算目标点到第1关节的距离
   double target_distance = std::sqrt(r * r + z * z);
 
@@ -173,7 +173,7 @@ bool XLeRobotKinematics::SolveVerticalPlane2D(double r, double z,
                           (2 * upper_arm_length_ * lower_arm_length_);
 
   // 计算肘部弯曲角度（选择正角度解，确保关节角度>0的约束）
-  elbow_flex_angle = std::acos(cos_elbow_flex);
+  elbow_flex_radian = std::acos(cos_elbow_flex);
 
   // 计算肩部抬升角度
   double alpha = std::atan2(r, z); // 目标点相对于水平面的角度
@@ -183,15 +183,15 @@ bool XLeRobotKinematics::SolveVerticalPlane2D(double r, double z,
                           (2 * upper_arm_length_ * target_distance));
 
   // 根据肘部弯曲角度决定肩部抬升角度的计算方式
-  // 保证 shoulder_lift_angle 为正数
-  shoulder_lift_angle = alpha - beta;
+  // 保证 shoulder_lift 向前是正数，向后是负数
+  shoulder_lift_radian = alpha - beta;
 
   return true;
 }
 
 std::pair<double, double> XLeRobotKinematics::CalculateEndEffectorOrientation(
-    const tf2::Transform &target_transform, double shoulder_lift_angle,
-    double elbow_flex_angle) {
+    const tf2::Transform &target_transform, double shoulder_lift_radian,
+    double elbow_flex_radian) {
 
   // 获取目标方向
   const double target_pitch =
@@ -199,27 +199,27 @@ std::pair<double, double> XLeRobotKinematics::CalculateEndEffectorOrientation(
 
   // 计算前两个关节造成的累积俯仰角，
   // 当 lower_arm_link 的朝向向下时，accumulated_pitch是负数，朝上则是正数。
-  double accumulated_pitch = elbow_flex_angle - shoulder_lift_angle - M_PI_2;
+  double accumulated_pitch = elbow_flex_radian - shoulder_lift_radian - M_PI_2;
 
   // 第3关节直接对应俯仰角，需要补偿前面关节的影响
   // 第3关节，wrist_flex 向下是正关节角度，向上是负关节角度
   //而 lower_arm_link 向下是负数，target_pitch
   //向下也是负数，所以要取反来获取正确的 wrist_flex 关节角度
-  double wrist_flex_angle = accumulated_pitch - target_pitch;
+  double wrist_flex_radian = accumulated_pitch - target_pitch;
 
   // 第4关节计算
-  double wrist_roll_angle = GetYaw(target_transform);
+  double wrist_roll_radian = GetYaw(target_transform);
 
-  // 限制wrist_roll_angle在关节限制范围内
+  // 限制wrist_roll_radian在关节限制范围内
   constexpr size_t kWristRollIndex = 4;
   if (kWristRollIndex < joint_lower_limits_.size() &&
       kWristRollIndex < joint_upper_limits_.size()) {
-    wrist_roll_angle =
-        std::clamp(wrist_roll_angle, joint_lower_limits_[kWristRollIndex],
+    wrist_roll_radian =
+        std::clamp(wrist_roll_radian, joint_lower_limits_[kWristRollIndex],
                    joint_upper_limits_[kWristRollIndex]);
   }
 
-  return std::make_pair(wrist_flex_angle, wrist_roll_angle);
+  return std::make_pair(wrist_flex_radian, wrist_roll_radian);
 }
 
 bool XLeRobotKinematics::ValidateJoints(
