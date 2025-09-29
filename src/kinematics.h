@@ -118,6 +118,16 @@ public:
    * @param timeout 超时时间（秒）
    */
   virtual void SetTimeout([[maybe_unused]] double timeout) {}
+
+  /**
+   * @brief 设置末端执行器链接名称（可选接口）
+   * @param end_effector_frame 末端执行器链接名称
+   */
+  virtual void SetEndEffectorFrame(const std::string &end_effector_frame);
+
+protected:
+  // 末端执行器链接名称
+  std::string end_effector_frame_;
 };
 
 /**

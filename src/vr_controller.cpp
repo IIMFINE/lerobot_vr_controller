@@ -190,6 +190,15 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
                 << std::endl;
     LE_LOG_INFO << "Using VR world frame: " << vr_world_frame_ << std::endl;
 
+    // Load end point frame configuration
+    if (config["end_effector_frame"]) {
+      end_point_frame_ = config["end_effector_frame"].as<std::string>();
+      LE_LOG_INFO << "end_effector_frame: " << end_point_frame_ << std::endl;
+    } else {
+      end_point_frame_ = "gripper_frame_link"; // default fallback
+      LE_LOG_INFO << "Using default end_effector_frame: " << end_point_frame_ << std::endl;
+    }
+
     // Load kinematics solver configurations
     if (config["kinematics"]) {
       auto kinematics_config = config["kinematics"];
@@ -745,6 +754,12 @@ bool VrRobotController::InitIkSolver() {
 
     // Set the tolerances loaded from YAML configuration
     ik_solver_->SetTolerances(position_tolerance_, orientation_tolerance_);
+    
+    // Set the end point frame loaded from YAML configuration
+    if (!end_point_frame_.empty()) {
+      ik_solver_->SetEndEffectorFrame(end_point_frame_);
+      LE_LOG_INFO << "End effector frame set to: " << end_point_frame_ << std::endl;
+    }
 
     LE_LOG_INFO << "IK solver (type: " << kinematics_solver_type_
                 << ") initialized successfully"

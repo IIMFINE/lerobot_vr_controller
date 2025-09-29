@@ -221,6 +221,9 @@ private:
   std::string gripper_world_frame_;
   std::string vr_world_frame_;
 
+  // End point frame name for kinematics solver
+  std::string end_point_frame_;
+
   // IK tolerance configurations loaded from YAML
   double position_tolerance_;
   double orientation_tolerance_;

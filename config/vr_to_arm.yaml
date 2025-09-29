@@ -1,29 +1,36 @@
+# tf link mapping
 vr_to_arm_tf:
-  #tf link mapping
   wrist_link: wrist_right
 gripper_world_frame: base_link
 vr_world_frame: world_vr
+end_effector_frame: gripper_frame_link
 
 # Kinematics solver configuration
 kinematics:
-  solver_type: "xlerobot"        # Options: "trac_ik", "xlerobot"
-  timeout: 0.005                 # IK solver timeout in seconds (for trac_ik)
+  # Options: "trac_ik", "xlerobot"
+  solver_type: "xlerobot"
+  # IK solver timeout in seconds (for trac_ik)
+  timeout: 0.005
 
 # IK solver tolerances configuration
 ik_tolerances:
-  position_tolerance: 0.03    # Position tolerance in meters
-  orientation_tolerance: 0.02  # Orientation tolerance in radians
-  xy_max_reach: 0.30           # Maximum xy plane reach limit in meters
+  # Position tolerance in meters
+  position_tolerance: 0.03
+  # Orientation tolerance in radians
+  orientation_tolerance: 0.02
+  # Maximum xy plane reach limit in meters
+  xy_max_reach: 0.30
 
 joy_config:
   trigger_config:
-    trigger_to_gripper_scale: 0.0068  # Scale factor for trigger input to gripper position
+    # Scale factor for trigger input to gripper position
+    trigger_to_gripper_scale: 0.0068
+    # {joint name: vr topic}
     joint_mappings:
-      # {joint name: vr topic}
       gripper: /vr/controller_right/joy
   axes_config:
     # meter unit input from axes
-    z_advance_scale: -0.0015
+    z_advance_scale: 0.0015
     # radian unit input from axes
     z_clockwise_rotate_scale: -0.03
 
