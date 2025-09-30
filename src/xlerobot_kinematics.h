@@ -61,15 +61,17 @@ public:
                   [[maybe_unused]] double timeout = 0.0) override;
 
   /**
-   * @brief 求解逆运动学
-   * @param target_transform 目标变换
-   * @param solution 求解结果关节角度
-   * @param seed_joints 种子关节角度（可选）
-   * @return 求解是否成功
+   * @brief 检查是否已初始化
+   * @return 初始化状态
    */
-  bool SolveIK(const tf2::Transform &target_transform,
-               std::vector<double> &solution,
-               [[maybe_unused]] const std::vector<double> &seed_joints = {}) override;
+  bool IsInitialized() const override;
+
+  /**
+   * @brief 检查目标位置是否在工作空间内
+   * @param target_transform 目标变换
+   * @return 是否在工作空间内
+   */
+  bool CheckWorkspace(const tf2::Transform &target_transform) const override;
 
   /**
    * @brief 获取关节数量
@@ -85,12 +87,6 @@ public:
    */
   bool GetJointLimits(std::vector<double> &lower_limits,
                       std::vector<double> &upper_limits) const override;
-
-  /**
-   * @brief 检查是否已初始化
-   * @return 初始化状态
-   */
-  bool IsInitialized() const override;
 
   /**
    * @brief 获取运动学链信息
@@ -115,44 +111,13 @@ public:
                            const std::vector<double> &joint_positions,
                            std::vector<double> &seed_joints) const override;
 
-  /**
-   * @brief 检查目标位置是否在工作空间内
-   * @param target_transform 目标变换
-   * @return 是否在工作空间内
-   */
-  bool CheckWorkspace(const tf2::Transform &target_transform) const override;
-
 private:
-  /**
-   * @brief 从tf2::Transform转换为KDL帧
-   * @param transform tf2变换
-   * @return KDL帧
-   */
-  KDL::Frame TransformToKDLFrame(const tf2::Transform &transform) const;
-
-  /**
-   * @brief 验证关节角度是否在限制范围内
-   * @param joints 关节角度
-   * @return 验证结果
-   */
-  bool ValidateJoints(const std::vector<double> &joints) const;
-
   /**
    * @brief 加载URDF模型
    * @param urdf_param URDF文件内容字符串
    * @return 加载是否成功
    */
   bool LoadURDF(const std::string &urdf_param);
-
-  /**
-   * @brief 设置默认关节限制（URDF加载失败时的后备方案）
-   */
-  void SetDefaultJointLimits();
-
-  /**
-   * @brief 打印所有机械臂长度参数
-   */
-  void PrintArmLengthParameters() const;
 
   /**
    * @brief 从URDF中解析机械臂结构参数
@@ -189,6 +154,22 @@ private:
   bool ParseEeFrameInitialOrientation(const std::string &base_link);
 
   /**
+   * @brief 设置默认关节限制（URDF加载失败时的后备方案）
+   */
+  void SetDefaultJointLimits();
+
+  /**
+   * @brief 求解逆运动学
+   * @param target_transform 目标变换
+   * @param solution 求解结果关节角度
+   * @param seed_joints 种子关节角度（可选）
+   * @return 求解是否成功
+   */
+  bool SolveIK(
+      const tf2::Transform &target_transform, std::vector<double> &solution,
+      [[maybe_unused]] const std::vector<double> &seed_joints = {}) override;
+
+  /**
    * @brief 极坐标逆运动学核心算法
    * @param target_transform 目标变换
    * @param solution 求解结果关节角度
@@ -220,6 +201,29 @@ private:
                                   double shoulder_lift_radian,
                                   double elbow_flex_radian);
 
+  /**
+   * @brief 验证关节角度是否在限制范围内
+   * @param joints 关节角度
+   * @return 验证结果
+   */
+  bool ValidateJoints(const std::vector<double> &joints) const;
+
+  /**
+   * @brief 从tf2::Transform转换为KDL帧
+   * @param transform tf2变换
+   * @return KDL帧
+   */
+  KDL::Frame TransformToKDLFrame(const tf2::Transform &transform) const;
+
+  /**
+   * @brief 打印所有机械臂长度参数
+   */
+  void PrintArmLengthParameters() const;
+
+  // URDF模型和初始化状态
+  std::unique_ptr<urdf::Model> urdf_model_;
+  bool initialized_;
+
   // 机械臂结构参数（从URDF动态读取）
   double base_to_shoulder_pan_height_; // 基座高度（base到shoulder_pan）
   double base_to_shoulder_lift_height_; // 基座到shoulder_lift的高度
@@ -233,13 +237,6 @@ private:
   double min_arm_reach_; // 最小工作半径
   double max_arm_reach_; // 最大工作半径
 
-  // URDF模型
-  std::unique_ptr<urdf::Model> urdf_model_;
-
-  // 配置参数
-  double position_tolerance_;
-  double orientation_tolerance_;
-
   // 关节信息
   std::vector<std::string> joint_names_;
   std::vector<double> joint_lower_limits_;
@@ -249,11 +246,13 @@ private:
   std::map<std::string, int> joint_placehold_map_;
   size_t num_joints_;
 
+  // 坐标变换参数
   tf2::Transform tip_link_initial_transform_;
   tf2::Transform ee_link_initial_transform_;
 
-  // 初始化状态
-  bool initialized_;
+  // 配置参数
+  double position_tolerance_;
+  double orientation_tolerance_;
 
   // 线程安全
   mutable std::mutex solver_mutex_;

@@ -27,6 +27,7 @@
 #include "vr_trigger_joint_convert.h"
 #include "yaml-cpp/yaml.h"
 
+#include "common_math.h"
 #include "interface_type.h"
 #include "log.h"
 #include "robot_communicate_interface.h"
@@ -116,8 +117,11 @@ private:
                    std::vector<double> &joint_solution,
                    const std::vector<double> &seed_joints = {});
 
-  // Normalize S101 gripper transform by setting yaw rotation to 0
-  tf2::Transform NormalizeS101GripperTf(const tf2::Transform &target_transform);
+  // Normalize S101 gripper transform with projection alignment
+  tf2::Transform NormalizeS101GripperTf(const tf2::Transform &target_transform,
+                                        DirectedAxis local_axis,
+                                        Plane projection_plane,
+                                        Axis world_axis);
 
   // Apply fine tune adjustments to target transform
   tf2::Transform

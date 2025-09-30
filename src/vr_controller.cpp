@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <fstream>
 #include <sstream>
 #include <tf2/utils.h>
@@ -871,8 +872,8 @@ VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
     position.setY(position.y() * scale_factor);
     position.setZ(position.z() * scale_factor);
 
-    LE_LOG_INFO << "Limited xyz reach from " << xyz_distance << " to "
-                << max_reach_ << std::endl;
+    LE_LOG_INFO_T(10s) << "Limited xyz reach from " << xyz_distance << " to "
+                       << max_reach_ << std::endl;
   }
 
   // Return the limited transform
@@ -883,85 +884,99 @@ VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
 }
 
 tf2::Transform VrRobotController::NormalizeS101GripperTf(
-    const tf2::Transform &target_transform) {
+  const tf2::Transform &target_transform,
+  DirectedAxis local_axis,
+  Plane projection_plane,
+  Axis world_axis) {
   tf2::Vector3 position = target_transform.getOrigin();
   tf2::Quaternion q = target_transform.getRotation();
 
-  constexpr double kEps = 1e-12;
-  constexpr double kPi = 3.14159265358979323846;
-  constexpr double kTwoPi = 2.0 * kPi;
-
-  // 若末端位姿位于世界Z轴上(x=y=0)，-Z射线天然与世界Z轴相交
-  if (std::abs(position.x()) < 1e-9 && std::abs(position.y()) < 1e-9) {
-    q.normalize();
+  if (q.length2() <= std::numeric_limits<double>::epsilon()) {
     tf2::Transform out;
     out.setOrigin(position);
     out.setRotation(q);
     return out;
   }
 
-  // 目标：使工具坐标系的 -Z 方向在 XY 平面上的投影与指向原点的径向向量对齐，
-  // 从而保证沿 -Z 的射线与世界Z轴相交。
-  auto normalize_angle = [kPi, kTwoPi](double angle) {
-    while (angle > kPi)
-      angle -= kTwoPi;
-    while (angle < -kPi)
-      angle += kTwoPi;
-    return angle;
+  auto axis_to_vec = [](Axis a) -> tf2::Vector3 {
+    if (a == Axis::kX) {
+      return tf2::Vector3(1.0, 0.0, 0.0);
+    }
+    if (a == Axis::kY) {
+      return tf2::Vector3(0.0, 1.0, 0.0);
+    }
+    return tf2::Vector3(0.0, 0.0, 1.0);
   };
 
-  tf2::Matrix3x3 rot_m(q);
-  // 当前工具坐标系 -Z 在世界系方向
-  tf2::Vector3 neg_z = -(rot_m * tf2::Vector3(0.0, 0.0, 1.0));
-
-  // 指向世界Z轴(原点在XY平面投影)的径向单位向量
-  tf2::Vector3 radial_dir(-position.x(), -position.y(), 0.0);
-  radial_dir.normalize();
-
-  // 若 -Z 的XY投影过小(与世界Z轴近乎平行)，先绕与径向垂直的轴给予微小倾角
-  tf2::Vector3 neg_z_xy(neg_z.x(), neg_z.y(), 0.0);
-  if (neg_z_xy.length2() < 1e-16) {
-    tf2::Vector3 tilt_axis(radial_dir.y(), -radial_dir.x(), 0.0); // 与径向正交
-    if (tilt_axis.length2() > kEps) {
-      tilt_axis.normalize();
-      const double tilt_angle = 0.08726646259971647; // 5度
-      tf2::Quaternion q_tilt;
-      q_tilt.setRotation(tilt_axis, tilt_angle);
-      q = q_tilt * q; // 世界系左乘
-      q.normalize();
-      rot_m.setRotation(q);
-      neg_z = -(rot_m * tf2::Vector3(0.0, 0.0, 1.0));
-      neg_z_xy = tf2::Vector3(neg_z.x(), neg_z.y(), 0.0);
+  auto directed_axis_to_local = [](DirectedAxis da) -> tf2::Vector3 {
+    if (da == DirectedAxis::kPosX) {
+      return tf2::Vector3(1.0, 0.0, 0.0);
     }
-  }
-
-  // 绕世界Z轴的偏航校正，使 -Z 的XY投影与径向向量对齐(指向原点)
-  double phi_dir = std::atan2(neg_z_xy.y(), neg_z_xy.x());
-  double phi_radial = std::atan2(radial_dir.y(), radial_dir.x());
-  double yaw_delta = normalize_angle(phi_radial - phi_dir);
-
-  tf2::Quaternion q_yaw;
-  q_yaw.setRPY(0.0, 0.0, yaw_delta);
-  q = q_yaw * q; // 世界系左乘
-  q.normalize();
-
-  // 再次校验对齐方向，若仍反向(背离原点)，再绕世界Z轴翻转180度
-  rot_m.setRotation(q);
-  neg_z = -(rot_m * tf2::Vector3(0.0, 0.0, 1.0));
-  tf2::Vector3 neg_z_xy2(neg_z.x(), neg_z.y(), 0.0);
-  if (neg_z_xy2.length2() > kEps) {
-    neg_z_xy2.normalize();
-    if (neg_z_xy2.dot(radial_dir) < 0.0) {
-      tf2::Quaternion q_flip;
-      q_flip.setRPY(0.0, 0.0, kPi);
-      q = q_flip * q;
-      q.normalize();
+    if (da == DirectedAxis::kNegX) {
+      return tf2::Vector3(-1.0, 0.0, 0.0);
     }
+    if (da == DirectedAxis::kPosY) {
+      return tf2::Vector3(0.0, 1.0, 0.0);
+    }
+    if (da == DirectedAxis::kNegY) {
+      return tf2::Vector3(0.0, -1.0, 0.0);
+    }
+    if (da == DirectedAxis::kPosZ) {
+      return tf2::Vector3(0.0, 0.0, 1.0);
+    }
+    return tf2::Vector3(0.0, 0.0, -1.0);
+  };
+
+  auto plane_normal = [](Plane p) -> tf2::Vector3 {
+    if (p == Plane::kXY) {
+      return tf2::Vector3(0.0, 0.0, 1.0);
+    }
+    if (p == Plane::kXZ) {
+      return tf2::Vector3(0.0, 1.0, 0.0);
+    }
+    return tf2::Vector3(1.0, 0.0, 0.0);
+  };
+
+  tf2::Vector3 n = plane_normal(projection_plane);
+  tf2::Vector3 world_dir = axis_to_vec(world_axis);
+  tf2::Vector3 local_dir = directed_axis_to_local(local_axis);
+
+  tf2::Matrix3x3 R(q);
+  tf2::Vector3 d_world = R * local_dir;
+
+  tf2::Vector3 d_proj = d_world - n * d_world.dot(n);
+  double d_proj_len2 = d_proj.length2();
+  if (d_proj_len2 <= 1e-16) {
+    tf2::Transform out;
+    out.setOrigin(position);
+    out.setRotation(q);
+    return out;
   }
+  d_proj.normalize();
+
+  tf2::Vector3 t_proj = world_dir - n * world_dir.dot(n);
+  double t_proj_len2 = t_proj.length2();
+  if (t_proj_len2 <= 1e-16) {
+    tf2::Transform out;
+    out.setOrigin(position);
+    out.setRotation(q);
+    return out;
+  }
+  t_proj.normalize();
+
+  tf2::Vector3 cross = d_proj.cross(t_proj);
+  double sin_theta = n.dot(cross);
+  double cos_theta = d_proj.dot(t_proj);
+  double angle = std::atan2(sin_theta, cos_theta);
+
+  tf2::Quaternion q_align;
+  q_align.setRotation(n, angle);
+  tf2::Quaternion q_new = q_align * q;
+  q_new.normalize();
 
   tf2::Transform result;
   result.setOrigin(position);
-  result.setRotation(q);
+  result.setRotation(q_new);
   return result;
 }
 
@@ -1079,26 +1094,40 @@ void VrRobotController::ProcessEePose(
     // Prepare for IK solution
     std::vector<double> joint_solution;
 
-    auto crrected_target_transform = NormalizeS101GripperTf(target_transform);
+    // auto corrected_target_transform = NormalizeS101GripperTf(
+    //     target_transform, DirectedAxis::kNegZ, Plane::kXY, Axis::kX);
 
-    crrected_target_transform =
-        ApplyTargetTfFineTune(crrected_target_transform);
+    auto corrected_target_transform = target_transform;
+
+    // Rotate around local -Y axis while keeping its direction unchanged
+    {
+      tf2::Quaternion q_curr = corrected_target_transform.getRotation();
+      if (q_curr.length2() > std::numeric_limits<double>::epsilon()) {
+        tf2::Quaternion qx;
+        qx.setRotation(tf2::Vector3(1.0, 0.0, 0.0), std::atan2(1.0, 0.0));
+        tf2::Quaternion q_new = q_curr * qx;
+        q_new.normalize();
+        corrected_target_transform.setRotation(q_new);
+      }
+    }
+
+    corrected_target_transform =
+        ApplyTargetTfFineTune(corrected_target_transform);
 
     // Apply constraints and limits to the target transform after fine tuning
-    crrected_target_transform = LimitTargetTf(crrected_target_transform);
+    corrected_target_transform = LimitTargetTf(corrected_target_transform);
 
-    // TODO: delete it Publish crrected_target_transform to TF
     {
       geometry_msgs::msg::TransformStamped test_gripper_tf;
       test_gripper_tf.header.stamp = node_->now();
       test_gripper_tf.header.frame_id = gripper_world_frame_;
-      test_gripper_tf.child_frame_id = "test_gripper";
-      test_gripper_tf.transform = tf2::toMsg(crrected_target_transform);
+      test_gripper_tf.child_frame_id = "corrected_gripper";
+      test_gripper_tf.transform = tf2::toMsg(corrected_target_transform);
       tf_broadcaster_->sendTransform(test_gripper_tf);
     }
 
     // Call IK solver
-    if (!IkGripperTf(crrected_target_transform, joint_solution, seed_joints)) {
+    if (!IkGripperTf(corrected_target_transform, joint_solution, seed_joints)) {
       LE_LOG_ERROR_T(5s) << "IK solving failed at queue index: " << i
                          << std::endl;
       continue;
