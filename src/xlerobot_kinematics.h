@@ -111,6 +111,12 @@ public:
                            const std::vector<double> &joint_positions,
                            std::vector<double> &seed_joints) const override;
 
+  /**
+   * @brief 获取 shoulder link 在初始姿态下的变换
+   * @return shoulder link 的初始变换
+   */
+  tf2::Transform GetShoulderLinkInitialTransform() const;
+
 private:
   /**
    * @brief 加载URDF模型
@@ -145,6 +151,7 @@ private:
   bool ParseTipLinkInitialOrientation(const std::string &base_link,
                                       const std::string &tip_link);
 
+
   /**
    * @brief 解析末端执行器在初始姿态下的方向
    * 使用基类中的 end_effector_frame_ 作为目标 link 名称
@@ -152,6 +159,15 @@ private:
    * @return 解析是否成功
    */
   bool ParseEeFrameInitialOrientation(const std::string &base_link);
+
+  /**
+   * @brief 解析 shoulder link 在初始姿态下的变换
+   * @param base_link 基座链接名称
+   * @param shoulder_link shoulder link 名称
+   * @return 解析是否成功
+   */
+  bool ParseShoulderLinkInitialTransform(const std::string &base_link,
+                                         const std::string &shoulder_link);
 
   /**
    * @brief 设置默认关节限制（URDF加载失败时的后备方案）
@@ -249,6 +265,8 @@ private:
   // 坐标变换参数
   tf2::Transform tip_link_initial_transform_;
   tf2::Transform ee_link_initial_transform_;
+  tf2::Transform shoulder_link_initial_transform_;
+  tf2::Transform base_link_initial_transform_;
 
   // 配置参数
   double position_tolerance_;

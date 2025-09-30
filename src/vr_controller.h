@@ -176,6 +176,9 @@ private:
   // Publish joint commands for rviz2 visualization
   void PublishJointCmd(const std::vector<double> &joint_solution);
 
+  // Publish joint commands for rviz2 visualization (overload for CusJointCmd)
+  void PublishJointCmd(const CusJointCmd &joint_cmd);
+
   // Publish current robot joint states at 100Hz
   void PublishRobotJointStates();
 
