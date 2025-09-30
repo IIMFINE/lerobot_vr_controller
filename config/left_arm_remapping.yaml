@@ -1,0 +1,8 @@
+topic:
+  /vr_controller/joint_cmd: /left/vr_controller/joint_cmd
+  /joint_states: /left/joint_states
+  /robot_control/motor_cmd: /left/robot_control/motor_cmd
+  /robot_control/motor_state: /left/robot_control/motor_state
+  /tf: /left/tf
+
+node: left_lerobot_vr_controller

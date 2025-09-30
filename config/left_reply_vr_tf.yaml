@@ -1,0 +1,6 @@
+# reply specific vr link transform to specific arm tf
+topic:
+  # topic name
+  /vr/tf:
+    - parent_link: world_vr
+      child_link: wrist_left
