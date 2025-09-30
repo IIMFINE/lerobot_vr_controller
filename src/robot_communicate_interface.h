@@ -13,6 +13,7 @@
 #include "interface_type.h"
 #include "joint_motor_convert.h"
 #include "log.h"
+#include "topic.h"
 
 namespace lerobot_vr_controller {
 
@@ -35,8 +36,8 @@ public:
   explicit RobotCommunicateInterface(
       std::shared_ptr<rclcpp::Node> node,
       std::shared_ptr<JointMotorConvert> joint_motor_converter,
-      const std::string &motor_cmd_topic = "/robot_control/motor_cmd",
-      const std::string &motor_state_topic = "/robot_control/motor_state");
+      const std::string &motor_cmd_topic = kRobotControlMotorCmdTopic,
+      const std::string &motor_state_topic = kRobotControlMotorStateTopic);
 
   /**
    * @brief Destructor

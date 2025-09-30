@@ -4,6 +4,7 @@
 
 #include "rclcpp/executors/multi_threaded_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "topic.h"
 #include "vr_controller.h"
 
 int main(int argc, char **argv) {
@@ -14,7 +15,7 @@ int main(int argc, char **argv) {
   auto node = std::make_shared<rclcpp::Node>("vr_tf_receiver_node");
 
   // Create VrRobotController instance
-  auto vr_tf_receiver =
+  auto vr_controller =
       std::make_unique<lerobot_vr_controller::VrRobotController>(node);
 
   // Initialize YAML configuration (you may want to make this configurable via
@@ -48,17 +49,17 @@ int main(int argc, char **argv) {
                                        motor_calibration_path);
   node->get_parameter("motor_calibration_file", motor_calibration_path);
 
-  constexpr const char *kMotorCmdTopic = "/robot_control/motor_cmd";
-
-  if (!vr_tf_receiver->Initialize(yaml_config_path, urdf_file_path,
-                                  joint_motor_config_path,
-                                  motor_calibration_path, kMotorCmdTopic)) {
+  if (!vr_controller->Initialize(
+          yaml_config_path, urdf_file_path, joint_motor_config_path,
+          motor_calibration_path,
+          lerobot_vr_controller::kRobotControlMotorCmdTopic,
+          lerobot_vr_controller::kRobotControlMotorStateTopic)) {
     RCLCPP_ERROR(node->get_logger(), "Failed to initialize VR TF receiver");
     return 1;
   }
 
   // Start VR TF receiver
-  vr_tf_receiver->Start();
+  vr_controller->Start();
 
   // Create multi-threaded executor
   rclcpp::executors::MultiThreadedExecutor executor;

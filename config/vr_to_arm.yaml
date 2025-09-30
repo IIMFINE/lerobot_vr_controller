@@ -1,5 +1,6 @@
 # tf link mapping
 vr_to_arm_tf:
+  # robot link: vr link
   wrist_link: wrist_right
 gripper_world_frame: base_link
 vr_world_frame: world_vr
@@ -25,9 +26,8 @@ joy_config:
   trigger_config:
     # Scale factor for trigger input to gripper position
     trigger_to_gripper_scale: 0.0068
-    # {joint name: vr topic}
-    joint_mappings:
-      gripper: /vr/controller_right/joy
+    # joint name for trigger control
+    joint_name: gripper
   axes_config:
     # meter unit input from axes
     z_advance_scale: -0.0015

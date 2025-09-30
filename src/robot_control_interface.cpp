@@ -10,14 +10,14 @@ RobotControlInterface::RobotControlInterface(
     std::shared_ptr<rclcpp::Node> node,
     const std::string &joint_motor_config_file_path,
     const std::string &motor_calibration_file_path,
-    const std::string &motor_cmd_topic) {
+    const std::string &motor_cmd_topic, const std::string &motor_state_topic) {
 
   // Create RobotCommunicateInterface instance
   robot_communicate_interface_ = std::make_unique<RobotCommunicateInterface>(
       node,
       std::make_shared<JointMotorConvert>(joint_motor_config_file_path,
                                           motor_calibration_file_path),
-      motor_cmd_topic);
+      motor_cmd_topic, motor_state_topic);
 
   LE_LOG_INFO << "RobotControlInterface constructed with config: "
               << joint_motor_config_file_path << std::endl;
