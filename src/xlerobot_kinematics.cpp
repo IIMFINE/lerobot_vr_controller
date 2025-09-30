@@ -78,6 +78,13 @@ bool XLeRobotKinematics::Initialize(
     }
   }
 
+  // 解析 shoulder link 的初始变换
+  const std::string shoulder_link_name = "shoulder_link";
+  if (!ParseShoulderLinkInitialTransform(base_link, shoulder_link_name)) {
+    LE_LOG_ERROR << "Failed to parse shoulder link initial transform for '"
+                 << shoulder_link_name << "'" << std::endl;
+  }
+
   initialized_ = true;
 
   // 打印所有机械臂长度参数
@@ -107,6 +114,13 @@ bool XLeRobotKinematics::SolvePolarIK(const tf2::Transform &target_transform,
   double x = target_pos.getX();
   double y = target_pos.getY();
   double z = target_pos.getZ();
+
+  // 使用 shoulder link 的初始平移来对齐目标坐标
+  const tf2::Vector3 shoulder_translation =
+    shoulder_link_initial_transform_.getOrigin();
+  x = x - shoulder_translation.getX() - 0.02;
+  // y = y - shoulder_translation.getY();
+  z = z - shoulder_translation.getZ()/2;
 
   // 步骤1：计算第0关节角度（极坐标旋转角）
   // 考虑URDF中shoulder_pan的origin偏移
@@ -208,7 +222,7 @@ std::pair<double, double> XLeRobotKinematics::CalculateEndEffectorOrientation(
   double wrist_flex_radian = accumulated_pitch - target_pitch;
 
   // 第4关节计算
-  double wrist_roll_radian = GetRoll(target_transform);
+  double wrist_roll_radian = -GetRoll(target_transform);
 
   // 限制wrist_roll_radian在关节限制范围内
   constexpr size_t kWristRollIndex = 4;
@@ -706,6 +720,101 @@ bool XLeRobotKinematics::ParseEeFrameInitialOrientation(
   return true;
 }
 
+bool XLeRobotKinematics::ParseShoulderLinkInitialTransform(
+    const std::string &base_link, const std::string &shoulder_link) {
+  shoulder_link_initial_transform_.setIdentity();
+
+  if (!urdf_model_) {
+    LE_LOG_ERROR << "URDF model not loaded" << std::endl;
+    return false;
+  }
+
+  if (shoulder_link.empty()) {
+    LE_LOG_ERROR << "Shoulder link name is empty" << std::endl;
+    return false;
+  }
+
+  auto link = urdf_model_->getLink(shoulder_link);
+  if (!link) {
+    LE_LOG_ERROR << "Shoulder link '" << shoulder_link
+                 << "' not found in URDF" << std::endl;
+    return false;
+  }
+
+  tf2::Quaternion accumulated_orientation(0.0, 0.0, 0.0, 1.0);
+  tf2::Vector3 accumulated_position(0.0, 0.0, 0.0);
+
+  while (link && link->parent_joint) {
+    const auto joint = link->parent_joint;
+    if (!joint) {
+      break;
+    }
+
+    const auto &origin = joint->parent_to_joint_origin_transform;
+    const auto &origin_rotation = origin.rotation;
+    const auto &origin_position = origin.position;
+
+    tf2::Quaternion joint_orientation(origin_rotation.x, origin_rotation.y,
+                                      origin_rotation.z, origin_rotation.w);
+    tf2::Vector3 joint_position(origin_position.x, origin_position.y,
+                                origin_position.z);
+
+    // 正确的链式累积：
+    // 若当前已知的是 target_link 相对于当前 link (向上遍历) 的变换 (R_acc, p_acc)
+    // 对于父关节的 parent->child 变换 (R_joint, p_joint) （URDF中 parent_to_joint_origin_transform）
+    // 则新的累积 (相对于其再上一层) 为：
+    // R_new = R_joint * R_acc
+    // p_new = R_joint * p_acc + p_joint
+    accumulated_position =
+        tf2::quatRotate(joint_orientation, accumulated_position) +
+        joint_position;
+    accumulated_orientation = joint_orientation * accumulated_orientation;
+
+    const std::string &parent_link_name = joint->parent_link_name;
+
+    if (!base_link.empty() && parent_link_name == base_link) {
+      break;
+    }
+
+    link = urdf_model_->getLink(parent_link_name);
+    if (!link) {
+      if (!base_link.empty()) {
+        LE_LOG_ERROR << "Parent link '" << parent_link_name
+                     << "' not found while parsing shoulder link transform"
+                     << std::endl;
+        return false;
+      }
+      break;
+    }
+  }
+
+  if (accumulated_orientation.length2() <=
+      std::numeric_limits<double>::epsilon()) {
+    accumulated_orientation.setValue(0.0, 0.0, 0.0, 1.0);
+  }
+  accumulated_orientation.normalize();
+
+  shoulder_link_initial_transform_.setOrigin(accumulated_position);
+  shoulder_link_initial_transform_.setRotation(accumulated_orientation);
+
+  double initial_roll = 0.0;
+  double initial_pitch = 0.0;
+  double initial_yaw = 0.0;
+  tf2::Matrix3x3(accumulated_orientation)
+      .getRPY(initial_roll, initial_pitch, initial_yaw);
+
+  LE_LOG_INFO << "Shoulder link initial transform: ";
+  LE_LOG_INFO << "  Position (xyz): x=" << std::fixed << std::setprecision(5)
+              << accumulated_position.x() << ", y="
+              << accumulated_position.y() << ", z=" << accumulated_position.z()
+              << std::endl;
+  LE_LOG_INFO << "  Orientation (RPY): roll=" << initial_roll
+              << ", pitch=" << initial_pitch << ", yaw=" << initial_yaw
+              << std::endl;
+
+  return true;
+}
+
 bool XLeRobotKinematics::ParseJointLimitsAndOffsets() {
   if (!urdf_model_) {
     LE_LOG_ERROR << "URDF model not loaded" << std::endl;
@@ -777,6 +886,10 @@ bool XLeRobotKinematics::ParseJointLimitsAndOffsets() {
                  << e.what() << std::endl;
     return false;
   }
+}
+
+tf2::Transform XLeRobotKinematics::GetShoulderLinkInitialTransform() const {
+  return shoulder_link_initial_transform_;
 }
 
 } // namespace lerobot_vr_controller

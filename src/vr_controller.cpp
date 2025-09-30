@@ -106,14 +106,14 @@ void VrRobotController::Start() {
                                                             rclcpp::QoS(10));
 
   // Create timer to execute CalibrateVr2GripperTf at 100Hz (100ms interval)
-  calibration_timer_ = node_->create_wall_timer(
-      std::chrono::milliseconds(10),
-      std::bind(&VrRobotController::CalibrateVr2GripperTf, this),
-      calibration_callback_group_);
+  // calibration_timer_ = node_->create_wall_timer(
+  //     std::chrono::milliseconds(10),
+  //     std::bind(&VrRobotController::CalibrateVr2GripperTf, this),
+  //     calibration_callback_group_);
 
   // Initialize VR to gripper TF publishing timer at 100Hz
   vr_to_gripper_publish_timer_ = node_->create_wall_timer(
-      std::chrono::milliseconds(10),
+      std::chrono::milliseconds(5),
       std::bind(&VrRobotController::Vr2GripperTfPublish, this),
       publish_callback_group_);
 
@@ -125,7 +125,7 @@ void VrRobotController::Start() {
 
   // Create joint state publish timer at 100Hz (10ms interval)
   joint_state_publish_timer_ = node_->create_wall_timer(
-      std::chrono::milliseconds(10),
+      std::chrono::milliseconds(5),
       std::bind(&VrRobotController::PublishRobotJointStates, this),
       joint_state_publish_callback_group_);
 
@@ -579,6 +579,9 @@ void VrRobotController::Vr2GripperTfPublish() {
 }
 
 void VrRobotController::UpdateVrPose() {
+  if (!IsControlRobot()) {
+    return;
+  }
   try {
     // Compute transform from VR to gripper target in gripper world frame
     tf2::Transform tf = Vr2GripperTf(vr_frame_);
@@ -638,6 +641,7 @@ void VrRobotController::JoystickCallback(
   // Check if buttons array has at least 6 elements (B button index)
   if (msg->buttons.size() > kBButton && msg->buttons[kBButton] != 0) {
     should_calibrate_ = true;
+    calibrated_flag_ = false;
     {
       std::unique_lock<std::shared_mutex> lock(ee_pose_fine_tune_mutex_);
       ee_pose_fine_tune_.z_advance_ = 0.0;
@@ -645,13 +649,30 @@ void VrRobotController::JoystickCallback(
     }
     StartRobotControl();
     MoveToHomePose();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     StopRobotControl();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    constexpr int kMaxCalibrationRetries = 3;
+    for (int retry = 0; retry < kMaxCalibrationRetries; ++retry) {
+      CalibrateVr2GripperTf();
+      LE_LOG_INFO << "Calibration attempt " << (retry + 1) << std::endl;
+
+      if (calibrated_flag_) {
+        LE_LOG_INFO << "Calibration successful after " << (retry + 1)
+                    << " attempt(s)" << std::endl;
+        break;
+      }
+
+      if (retry < kMaxCalibrationRetries - 1) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+    }
+
     LE_LOG_INFO_T(1s) << "Moving to home pose triggered by joystick B button"
                       << std::endl;
     LE_LOG_INFO_T(1s) << "Calibration triggered by joystick B button"
                       << std::endl;
+    return;
   }
 
   // Handle trigger input for gripper control
@@ -857,6 +878,14 @@ VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
 
     LE_LOG_INFO_T(10s) << "Limited xyz reach from " << xyz_distance << " to "
                        << max_reach_ << std::endl;
+  }
+
+  if (position.x() <= 0.095 && std::abs(position.y()) <= 0.01) {
+    position.setY(0.0);
+  }
+
+  if (position.x() <= 0.09) {
+    position.setX(0.09);
   }
 
   // Return the limited transform
@@ -1288,6 +1317,37 @@ void VrRobotController::PublishJointCmd(
   joint_state_publisher_->publish(joint_state_msg);
 }
 
+void VrRobotController::PublishJointCmd(const CusJointCmd &joint_cmd) {
+  if (!joint_state_publisher_) {
+    LE_LOG_ERROR << "Joint command publisher not initialized" << std::endl;
+    return;
+  }
+
+  if (joint_cmd.joints.empty()) {
+    LE_LOG_ERROR << "Joint command is empty" << std::endl;
+    return;
+  }
+
+  // Create and populate joint command message
+  sensor_msgs::msg::JointState joint_state_msg;
+  joint_state_msg.header.stamp = node_->now();
+  joint_state_msg.header.frame_id = gripper_world_frame_;
+
+  // Extract joint names and positions from CusJointCmd
+  for (const auto &[joint_name, position] : joint_cmd.joints) {
+    joint_state_msg.name.push_back(joint_name);
+    joint_state_msg.position.push_back(position);
+  }
+
+  // Set velocities and efforts to zero (we're only interested in positions for
+  // visualization)
+  joint_state_msg.velocity.resize(joint_cmd.joints.size(), 0.0);
+  joint_state_msg.effort.resize(joint_cmd.joints.size(), 0.0);
+
+  // Publish the joint command
+  joint_state_publisher_->publish(joint_state_msg);
+}
+
 void VrRobotController::TargetVrPoseEnqueue(
     geometry_msgs::msg::TransformStamped ts) {
 
@@ -1414,6 +1474,7 @@ bool VrRobotController::MoveToHomePose() {
         CusJointCmd home_cmd =
             Convert2CusJointCmd(matching_joint_names, matching_positions);
 
+        PublishJointCmd(home_cmd);
         // Enqueue the command
         JointCmdEnqueue(home_cmd);
 
