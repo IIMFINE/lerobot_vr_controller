@@ -11,13 +11,13 @@
 namespace lerobot_vr_controller {
 
 XLeRobotKinematics::XLeRobotKinematics()
-    : base_to_shoulder_pan_height_(0.0624),
+    : urdf_model_(nullptr), initialized_(false),
+      base_to_shoulder_pan_height_(0.0624),
       base_to_shoulder_lift_height_(0.0624), shoulder_pan_offset_(0.0),
       upper_arm_length_(0.11257), lower_arm_length_(0.1349),
       wrist_flex_to_roll_offset_(0.0611), wrist_roll_to_gripper_offset_(0.0181),
-      min_arm_reach_(0.0), max_arm_reach_(0.0), urdf_model_(nullptr),
-      position_tolerance_(1e-4), orientation_tolerance_(1e-3), num_joints_(5),
-      initialized_(false) {
+      min_arm_reach_(0.0), max_arm_reach_(0.0), num_joints_(5),
+      position_tolerance_(1e-4), orientation_tolerance_(1e-3) {
   // 初始化关节RPY偏移量（默认值，将从URDF更新）
   joint_origin_rpy_offsets_.resize(5, 0.0);
   tip_link_initial_transform_.setIdentity();
@@ -208,7 +208,7 @@ std::pair<double, double> XLeRobotKinematics::CalculateEndEffectorOrientation(
   double wrist_flex_radian = accumulated_pitch - target_pitch;
 
   // 第4关节计算
-  double wrist_roll_radian = GetYaw(target_transform);
+  double wrist_roll_radian = GetRoll(target_transform);
 
   // 限制wrist_roll_radian在关节限制范围内
   constexpr size_t kWristRollIndex = 4;
