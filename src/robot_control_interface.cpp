@@ -199,16 +199,9 @@ std::optional<CusJointCmd> RobotControlInterface::FuseCommand() {
       lock(joint_cmd_queue_mutex_, gripper_cmd_queue_mutex_, last_cmd_mutex_);
 
   // Helper lambda to check if two commands can be fused
-  auto can_fuse = [this](const CusJointCmd &cmd1, const CusJointCmd &cmd2) {
-    const uint64_t time_diff = (cmd1.timestamp_ns > cmd2.timestamp_ns)
-                                   ? (cmd1.timestamp_ns - cmd2.timestamp_ns)
-                                   : (cmd2.timestamp_ns - cmd1.timestamp_ns);
-
-    // TODO: delete it Print time_diff in microseconds at 500ms frequency
-    LE_LOG_INFO_T(500ms) << "FuseCommand: time_diff = " << (time_diff / 1000.0)
-                         << " us" << std::endl;
-
-    return time_diff <= kFusionThresholdNs;
+  auto can_fuse = [this]([[maybe_unused]] const CusJointCmd &cmd1,
+                         [[maybe_unused]] const CusJointCmd &cmd2) {
+    return true;
   };
 
   // Helper lambda to create fused command

@@ -1,0 +1,55 @@
+# tf link mapping
+vr_to_arm_tf:
+  # robot link: vr link
+  wrist_link: wrist_left
+gripper_world_frame: base_link
+vr_world_frame: world_vr
+end_effector_frame: gripper_frame_link
+
+# Kinematics solver configuration
+kinematics:
+  # Options: "xlerobot"
+  solver_type: "xlerobot"
+  # IK solver timeout in seconds
+  timeout: 0.005
+
+# IK solver tolerances configuration
+ik_tolerances:
+  # Position tolerance in meters
+  position_tolerance: 0.03
+  # Orientation tolerance in radians
+  orientation_tolerance: 0.02
+  # Maximum xy plane reach limit in meters
+  max_reach: 0.4
+
+joy_config:
+  trigger_config:
+    # Scale factor for trigger input to gripper position
+    trigger_to_gripper_scale: 0.0068
+    # joint name for trigger control
+    joint_name: gripper
+  axes_config:
+    # meter unit input from axes
+    z_advance_scale: -0.0015
+    # radian unit input from axes
+    z_clockwise_rotate_scale: -0.03
+
+joint_pose:
+  home_pose:
+    joint_name:
+      - shoulder_pan
+      - shoulder_lift
+      - elbow_flex
+      - wrist_flex
+      - wrist_roll
+      - gripper
+    position:
+      - -0.019
+      - -0.955
+      - 1.0
+      - 0.0
+      - -0.021
+      - 0.0
+
+joint_filter:
+  alpha: 0.5

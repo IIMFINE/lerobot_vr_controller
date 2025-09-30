@@ -56,6 +56,7 @@ install(
 install(
   PROGRAMS
     script/reply_joint_state.py
+    script/reply_vr_tf.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
