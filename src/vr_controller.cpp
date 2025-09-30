@@ -56,7 +56,7 @@ bool VrRobotController::Initialize(
     const std::string &yaml_file_path, const std::string &urdf_file_path,
     const std::string &joint_motor_config_file_path,
     const std::string &motor_calibration_file_path,
-    const std::string &motor_cmd_topic) {
+    const std::string &motor_cmd_topic, const std::string &motor_state_topic) {
   // Perform any additional initialization steps here
   LE_LOG_INFO << "Initialize() called" << std::endl;
 
@@ -81,7 +81,7 @@ bool VrRobotController::Initialize(
   // Initialize robot control interface
   robot_control_interface_ = std::make_unique<RobotControlInterface>(
       node_, joint_motor_config_file_path, motor_calibration_file_path,
-      motor_cmd_topic);
+      motor_cmd_topic, motor_state_topic);
 
   if (!robot_control_interface_->Initialize()) {
     LE_LOG_ERROR << "Failed to initialize robot control interface" << std::endl;
@@ -133,11 +133,10 @@ void VrRobotController::Start() {
   auto qos = rclcpp::QoS(10).best_effort();
   auto joy_sub_options = rclcpp::SubscriptionOptions();
   joy_sub_options.callback_group = joy_callback_group_;
-  std::string joy_topic_name = kVrControllerRightJoyTopic;
   joy_subscriber_ = node_->create_subscription<sensor_msgs::msg::Joy>(
-      joy_topic_name, qos,
-      [this, joy_topic_name](const sensor_msgs::msg::Joy::SharedPtr msg) {
-        JoystickCallback(msg, joy_topic_name);
+      kVrControllerJoyTopic, qos,
+      [this](const sensor_msgs::msg::Joy::SharedPtr msg) {
+        JoystickCallback(msg, kVrControllerJoyTopic);
       },
       joy_sub_options);
 
@@ -356,37 +355,29 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
                       << trigger_scale << std::endl;
         }
 
-        // Parse joint_mappings
-        if (trigger_config["joint_mappings"]) {
-          auto joint_mappings = trigger_config["joint_mappings"];
-          for (auto it = joint_mappings.begin(); it != joint_mappings.end();
-               ++it) {
-            std::string joint_name = it->first.as<std::string>();
-            std::string vr_topic = it->second.as<std::string>();
-
-            joint_to_vr_topic_map_[joint_name] = vr_topic;
-
-            LE_LOG_INFO << "Loaded joint mapping: " << joint_name << " -> "
-                        << vr_topic << std::endl;
-          }
+        // Parse joint_name
+        std::string joint_name = kDefaultGripperJointName; // default value
+        if (trigger_config["joint_name"]) {
+          joint_name = trigger_config["joint_name"].as<std::string>();
+          LE_LOG_INFO << "Loaded joint name for trigger control: " << joint_name
+                      << std::endl;
+        } else {
+          LE_LOG_INFO << "Using default joint name for trigger control: "
+                      << joint_name << std::endl;
         }
+
+        // Configure trigger converter for the specified joint
+        vr_controller::TriggerJointConfig joint_config(
+            joint_name,   // joint_name
+            0.0,          // default_joint_position
+            0.0,          // trigger_default_position
+            trigger_scale // trigger_to_gripper_scale
+        );
+
+        trigger_converter_->AddJointConfig(joint_config);
+        LE_LOG_INFO << "Configured trigger converter for joint: " << joint_name
+                    << " with scale: " << trigger_scale << std::endl;
       }
-    }
-
-    // Also configure trigger converter for any joints specified in
-    // joint_mappings
-    for (const auto &[joint_name, vr_topic] : joint_to_vr_topic_map_) {
-      vr_controller::TriggerJointConfig joint_config(
-          joint_name,   // joint_name
-          0.0,          // default_joint_position
-          0.0,          // trigger_default_position
-          trigger_scale // trigger_to_gripper_scale
-      );
-
-      trigger_converter_->AddJointConfig(joint_config);
-      LE_LOG_INFO << "Configured trigger converter for mapped joint: "
-                  << joint_name << " with scale: " << trigger_scale
-                  << std::endl;
     }
 
     // Load the single gripper link mapping from vr_to_arm_tf
@@ -663,34 +654,26 @@ void VrRobotController::JoystickCallback(
                       << std::endl;
   }
 
-  // Handle trigger input for gripper control based on joint_mappings
-  // configuration
+  // Handle trigger input for gripper control
   if (trigger_converter_) {
-    // Find which joint(s) are mapped to this VR topic
-    for (const auto &[joint_name, vr_topic] : joint_to_vr_topic_map_) {
-      if (vr_topic == topic_name) {
-        // This joint is controlled by the current VR topic
-        double trigger_value = 0.0;
-
-        // Extract trigger value from the joystick message
-        if (msg->buttons.size() > kTriggerButton) {
-          trigger_value = static_cast<double>(msg->buttons[kTriggerButton]);
-        }
-
-        // Convert trigger value to gripper joint position
-        auto gripper_position = ConvertTriggerJointPosition(trigger_value);
-
-        // Convert trigger value to CusJointCmd and send to control robot
-        // gripper
-        LE_LOG_INFO_T(1s) << "Mapped joint: " << joint_name
-                          << ", VR topic: " << vr_topic
-                          << ", Trigger value: " << trigger_value
-                          << ", Gripper position: " << gripper_position
-                          << std::endl;
-        auto gripper_cmd = Convert2CusJointCmd(joint_name, trigger_value);
-        GripperCmdEnqueue(gripper_cmd);
-      }
+    // Extract trigger value from the joystick message
+    double trigger_value = 0.0;
+    if (msg->buttons.size() > kTriggerButton) {
+      trigger_value = static_cast<double>(msg->buttons[kTriggerButton]);
     }
+
+    // Convert trigger value to gripper joint position
+    auto gripper_position = ConvertTriggerJointPosition(trigger_value);
+
+    // Convert trigger value to CusJointCmd and send to control robot gripper
+    // Use the default gripper joint name
+    std::string joint_name = kDefaultGripperJointName;
+    LE_LOG_INFO_T(1s) << "Joint: " << joint_name << ", VR topic: " << topic_name
+                      << ", Trigger value: " << trigger_value
+                      << ", Gripper position: " << gripper_position
+                      << std::endl;
+    auto gripper_cmd = Convert2CusJointCmd(joint_name, trigger_value);
+    GripperCmdEnqueue(gripper_cmd);
   }
 
   // Handle axes input for EE pose fine tune
@@ -1301,7 +1284,7 @@ void VrRobotController::PublishJointCmd(
   joint_state_msg.velocity.resize(joint_solution.size(), 0.0);
   joint_state_msg.effort.resize(joint_solution.size(), 0.0);
 
-  // Publish the joint command
+  // FIXME: Publish the joint command for debug
   joint_state_publisher_->publish(joint_state_msg);
 }
 

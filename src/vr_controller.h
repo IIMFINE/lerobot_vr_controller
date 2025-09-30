@@ -32,6 +32,7 @@
 #include "log.h"
 #include "robot_communicate_interface.h"
 #include "robot_control_interface.h"
+#include "topic.h"
 
 namespace lerobot_vr_controller {
 
@@ -48,25 +49,18 @@ static constexpr const char *kGripperCalSuffix = "_cal";
 static constexpr const char *kVrBaseLinkDummySuffix = "_vr_dummy";
 static constexpr const char *kDefaultGripperJointName = "gripper";
 
-// Topic name constants
-static constexpr const char *kVrControllerJointCmdTopic =
-    "/vr_controller/joint_cmd";
-static constexpr const char *kVrControllerRightJoyTopic =
-    "/vr/controller_right/joy";
-static constexpr const char *kJointStatesTopic = "/joint_states";
-
 class VrRobotController {
 public:
   explicit VrRobotController(std::shared_ptr<rclcpp::Node> node);
   ~VrRobotController();
 
   // Initialize the VR TF receiver with YAML configuration
-  bool
-  Initialize(const std::string &yaml_file_path,
-             const std::string &urdf_file_path,
-             const std::string &joint_motor_config_file_path,
-             const std::string &motor_calibration_file_path,
-             const std::string &motor_cmd_topic = "/robot_control/motor_cmd");
+  bool Initialize(
+      const std::string &yaml_file_path, const std::string &urdf_file_path,
+      const std::string &joint_motor_config_file_path,
+      const std::string &motor_calibration_file_path,
+      const std::string &motor_cmd_topic = kRobotControlMotorCmdTopic,
+      const std::string &motor_state_topic = kRobotControlMotorStateTopic);
 
   // === Core Control Functions ===
   void Start();
@@ -241,9 +235,6 @@ private:
   // Axes fine tune scale configurations loaded from YAML
   double z_advance_scale_ = 0.01;
   double z_clockwise_rotate_scale_ = 0.08;
-
-  // Mapping from joint name to VR topic for trigger control
-  std::map<std::string, std::string> joint_to_vr_topic_map_;
 
   // === VR Calibration Data ===
   std::atomic<bool> should_calibrate_{false};

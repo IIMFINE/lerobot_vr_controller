@@ -38,12 +38,14 @@ public:
    * @param motor_calibration_file_path Path to motor calibration file
    * (optional)
    * @param motor_cmd_topic Topic name for publishing motor positions
+   * @param motor_state_topic Topic name for subscribing to motor state
    */
   explicit RobotControlInterface(
       std::shared_ptr<rclcpp::Node> node,
       const std::string &joint_motor_config_file_path,
       const std::string &motor_calibration_file_path,
-      const std::string &motor_cmd_topic = "/robot_control/motor_cmd");
+      const std::string &motor_cmd_topic = "/robot_control/motor_cmd",
+      const std::string &motor_state_topic = "/robot_control/motor_state");
 
   /**
    * @brief Destructor that properly shuts down all worker threads.
