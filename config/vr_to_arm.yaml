@@ -7,9 +7,9 @@ end_effector_frame: gripper_frame_link
 
 # Kinematics solver configuration
 kinematics:
-  # Options: "trac_ik", "xlerobot"
+  # Options: "xlerobot"
   solver_type: "xlerobot"
-  # IK solver timeout in seconds (for trac_ik)
+  # IK solver timeout in seconds
   timeout: 0.005
 
 # IK solver tolerances configuration

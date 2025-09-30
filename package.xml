@@ -4,7 +4,7 @@
   <name>lerobot_vr_controller</name>
   <version>0.0.0</version>
   <description>ROS2 package for SO-ARM101 robot VR controller</description>
-  <maintainer email="pan@todo.todo">pan</maintainer>
+  <maintainer email="pcb1712379335@gmail.com">pan</maintainer>
   <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
@@ -27,7 +27,6 @@
   <depend>tf2_kdl</depend>
   <depend>kdl_parser</depend>
   <depend>orocos_kdl</depend>
-  <depend>trac_ik_lib</depend>
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

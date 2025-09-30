@@ -14,7 +14,6 @@ namespace lerobot_vr_controller {
  * @brief 运动学求解器类型枚举
  */
 enum class KinematicsType {
-  TRAC_IK,      // 使用TRAC-IK库的数值求解器
   XLEROBOT      // 使用极坐标的解析求解器
 };
 
@@ -144,7 +143,7 @@ public:
 
   /**
    * @brief 根据字符串创建运动学求解器
-   * @param type_str 求解器类型字符串 ("trac_ik" 或 "xlerobot")
+   * @param type_str 求解器类型字符串 ("xlerobot")
    * @return 运动学求解器智能指针
    */
   static std::unique_ptr<KinematicsInterface> CreateKinematics(const std::string &type_str);
