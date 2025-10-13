@@ -1,5 +1,6 @@
 #include "vr_controller.h"
 #include "log.h"
+#include "xlerobot_kinematics.h"
 
 #include <algorithm>
 #include <chrono>
@@ -434,6 +435,17 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
           << std::endl;
     }
 
+    // Load enable_human_arm configuration
+    if (config["enable_human_arm"]) {
+      enable_human_arm_ = config["enable_human_arm"].as<bool>();
+      LE_LOG_INFO << "Loaded enable_human_arm: "
+                  << (enable_human_arm_ ? "true" : "false") << std::endl;
+    } else {
+      enable_human_arm_ = false;
+      LE_LOG_INFO << "enable_human_arm not found, using default: false"
+                  << std::endl;
+    }
+
     return true;
 
   } catch (const std::exception &e) {
@@ -771,6 +783,14 @@ bool VrRobotController::InitIkSolver() {
       LE_LOG_INFO << "End effector frame set to: " << end_point_frame_ << std::endl;
     }
 
+    // Set enable_human_arm_ for XLeRobotKinematics
+    auto xlerobot_kinematics = dynamic_cast<XLeRobotKinematics*>(ik_solver_.get());
+    if (xlerobot_kinematics) {
+      xlerobot_kinematics->SetEnableHumanArm(enable_human_arm_);
+      LE_LOG_INFO << "XLeRobotKinematics enable_human_arm_ set to: "
+                  << (enable_human_arm_ ? "true" : "false") << std::endl;
+    }
+
     LE_LOG_INFO << "IK solver (type: " << kinematics_solver_type_
                 << ") initialized successfully"
                 << " - Base: " << gripper_world_frame_ << ", Tip: " << tip_link_ << " with "
@@ -893,6 +913,20 @@ VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
   limited_transform.setOrigin(position);
   limited_transform.setRotation(rotation);
   return limited_transform;
+}
+
+tf2::Transform
+VrRobotController::PersonifyEePose(const tf2::Transform &target_transform) {
+  static double origin_z = 0.4;
+
+  tf2::Quaternion q = target_transform.getRotation();
+
+  tf2::Vector3 position = target_transform.getOrigin();
+  position.setY(-position.y());
+
+  // TODO: (Bubble) use gripper height from tf
+  position.setZ(origin_z - position.z());
+  return tf2::Transform(q, position);
 }
 
 tf2::Transform VrRobotController::NormalizeS101GripperTf(
@@ -1128,6 +1162,8 @@ void VrRobotController::ProcessEePose(
 
     // Apply constraints and limits to the target transform after fine tuning
     corrected_target_transform = LimitTargetTf(corrected_target_transform);
+
+    corrected_target_transform = PersonifyEePose(corrected_target_transform);
 
     {
       geometry_msgs::msg::TransformStamped test_gripper_tf;
