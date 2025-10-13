@@ -53,3 +53,5 @@ joint_pose:
 
 joint_filter:
   alpha: 0.5
+
+enable_human_arm: true
