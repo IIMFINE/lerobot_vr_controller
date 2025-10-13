@@ -609,10 +609,25 @@ void VrRobotController::UpdateVrPose() {
     ts.transform.translation.z = t.z();
 
     tf2::Quaternion q = tf.getRotation();
-    ts.transform.rotation.x = q.x();
-    ts.transform.rotation.y = q.y();
-    ts.transform.rotation.z = q.z();
-    ts.transform.rotation.w = q.w();
+    if (q.length2() <= std::numeric_limits<double>::epsilon()) {
+      return;
+    }
+    q.normalize();
+    tf2::Quaternion q_out = q;
+    if (enable_human_arm_) {
+      double roll = 0.0;
+      double pitch = 0.0;
+      double yaw = 0.0;
+      tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+      tf2::Quaternion q_adj;
+      q_adj.setRPY(-roll, pitch, yaw);
+      q_adj.normalize();
+      q_out = q_adj;
+    }
+    ts.transform.rotation.x = q_out.x();
+    ts.transform.rotation.y = q_out.y();
+    ts.transform.rotation.z = q_out.z();
+    ts.transform.rotation.w = q_out.w();
 
     // Enqueue target VR pose
     TargetVrPoseEnqueue(std::move(ts));
@@ -926,6 +941,7 @@ VrRobotController::PersonifyEePose(const tf2::Transform &target_transform) {
 
   // TODO: (Bubble) use gripper height from tf
   position.setZ(origin_z - position.z());
+
   return tf2::Transform(q, position);
 }
 
