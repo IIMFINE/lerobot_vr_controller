@@ -124,6 +124,9 @@ private:
   // Apply constraints and limits to target transform
   tf2::Transform LimitTargetTf(const tf2::Transform &target_transform) const;
 
+  // Convert end-effector pose to human arm mode
+  tf2::Transform PersonifyEePose(const tf2::Transform &target_transform);
+
   // Control joint with end effector poses from local queue
   void ProcessEePose(
       const std::deque<geometry_msgs::msg::TransformStamped> &local_queue);
@@ -333,6 +336,10 @@ private:
   // EE pose fine tune control from VR joystick axes
   EePoseFineTune ee_pose_fine_tune_;
   mutable std::shared_mutex ee_pose_fine_tune_mutex_;
+
+  // === Human Arm Configuration ===
+  // Enable human arm mode loaded from YAML configuration
+  bool enable_human_arm_;
 };
 
 } // namespace lerobot_vr_controller

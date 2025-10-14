@@ -17,7 +17,8 @@ XLeRobotKinematics::XLeRobotKinematics()
       upper_arm_length_(0.11257), lower_arm_length_(0.1349),
       wrist_flex_to_roll_offset_(0.0611), wrist_roll_to_gripper_offset_(0.0181),
       min_arm_reach_(0.0), max_arm_reach_(0.0), num_joints_(5),
-      position_tolerance_(1e-4), orientation_tolerance_(1e-3) {
+      position_tolerance_(1e-4), orientation_tolerance_(1e-3),
+      enable_human_arm_(false) {
   // 初始化关节RPY偏移量（默认值，将从URDF更新）
   joint_origin_rpy_offsets_.resize(5, 0.0);
   tip_link_initial_transform_.setIdentity();
@@ -890,6 +891,10 @@ bool XLeRobotKinematics::ParseJointLimitsAndOffsets() {
 
 tf2::Transform XLeRobotKinematics::GetShoulderLinkInitialTransform() const {
   return shoulder_link_initial_transform_;
+}
+
+void XLeRobotKinematics::SetEnableHumanArm(bool enable) {
+  enable_human_arm_ = enable;
 }
 
 } // namespace lerobot_vr_controller

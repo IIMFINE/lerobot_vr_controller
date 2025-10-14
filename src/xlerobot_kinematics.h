@@ -117,6 +117,12 @@ public:
    */
   tf2::Transform GetShoulderLinkInitialTransform() const;
 
+  /**
+   * @brief 设置是否启用人类手臂模式
+   * @param enable 是否启用
+   */
+  void SetEnableHumanArm(bool enable);
+
 private:
   /**
    * @brief 加载URDF模型
@@ -271,6 +277,7 @@ private:
   // 配置参数
   double position_tolerance_;
   double orientation_tolerance_;
+  bool enable_human_arm_;
 
   // 线程安全
   mutable std::mutex solver_mutex_;
