@@ -4,6 +4,4 @@ topic:
   /robot_control/motor_cmd: /right/robot_control/motor_cmd
   /robot_control/motor_state: /right/robot_control/motor_state
   /tf: /right/tf
-  
-
 node: right_lerobot_vr_controller
