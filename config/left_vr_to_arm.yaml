@@ -44,12 +44,15 @@ joint_pose:
       - wrist_roll
       - gripper
     position:
-      - 0.0
-      - -1.5370691374311618
-      - 1.522
-      - 0.0
-      - 0.0
+      - -0.019
+      - -0.955
+      - 1.0
+      - 0.035
+      - -0.021
       - 0.0
 
 joint_filter:
   alpha: 0.5
+
+
+enable_human_arm: true

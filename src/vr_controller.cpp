@@ -613,21 +613,23 @@ void VrRobotController::UpdateVrPose() {
       return;
     }
     q.normalize();
-    tf2::Quaternion q_out = q;
-    if (enable_human_arm_) {
-      double roll = 0.0;
-      double pitch = 0.0;
-      double yaw = 0.0;
-      tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
-      tf2::Quaternion q_adj;
-      q_adj.setRPY(-roll, pitch, yaw);
-      q_adj.normalize();
-      q_out = q_adj;
+
+    if(enable_human_arm_)
+    {
+      tf2::Matrix3x3 R(q);
+      tf2::Vector3 c0 = R.getColumn(0);
+      // Extract world Y rotation angle beta from XZ projection of local X-axis
+      double beta = std::atan2(c0.z(), c0.x());
+      tf2::Quaternion q_correction;
+      q_correction.setRotation(tf2::Vector3(0.0, 1.0, 0.0), -2.0 * beta);
+      tf2::Quaternion q_out = q_correction * q;
+      q_out.normalize();
+      ts.transform.rotation.x = q_out.x();
+      ts.transform.rotation.y = q_out.y();
+      ts.transform.rotation.z = q_out.z();
+      ts.transform.rotation.w = q_out.w();
     }
-    ts.transform.rotation.x = q_out.x();
-    ts.transform.rotation.y = q_out.y();
-    ts.transform.rotation.z = q_out.z();
-    ts.transform.rotation.w = q_out.w();
+
 
     // Enqueue target VR pose
     TargetVrPoseEnqueue(std::move(ts));
@@ -933,6 +935,10 @@ VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
 tf2::Transform
 VrRobotController::PersonifyEePose(const tf2::Transform &target_transform) {
   static double origin_z = 0.4;
+
+  if (!enable_human_arm_) {
+    return target_transform;
+  }
 
   tf2::Quaternion q = target_transform.getRotation();
 
