@@ -1,5 +1,6 @@
 #include "vr_controller.h"
 #include "log.h"
+#include "xlerobot_kinematics.h"
 
 #include <algorithm>
 #include <chrono>
@@ -434,6 +435,17 @@ bool VrRobotController::LoadYamlConfig(const std::string &yaml_file_path) {
           << std::endl;
     }
 
+    // Load enable_human_arm configuration
+    if (config["enable_human_arm"]) {
+      enable_human_arm_ = config["enable_human_arm"].as<bool>();
+      LE_LOG_INFO << "Loaded enable_human_arm: "
+                  << (enable_human_arm_ ? "true" : "false") << std::endl;
+    } else {
+      enable_human_arm_ = false;
+      LE_LOG_INFO << "enable_human_arm not found, using default: false"
+                  << std::endl;
+    }
+
     return true;
 
   } catch (const std::exception &e) {
@@ -597,10 +609,27 @@ void VrRobotController::UpdateVrPose() {
     ts.transform.translation.z = t.z();
 
     tf2::Quaternion q = tf.getRotation();
-    ts.transform.rotation.x = q.x();
-    ts.transform.rotation.y = q.y();
-    ts.transform.rotation.z = q.z();
-    ts.transform.rotation.w = q.w();
+    if (q.length2() <= std::numeric_limits<double>::epsilon()) {
+      return;
+    }
+    q.normalize();
+
+    if(enable_human_arm_)
+    {
+      tf2::Matrix3x3 R(q);
+      tf2::Vector3 c0 = R.getColumn(0);
+      // Extract world Y rotation angle beta from XZ projection of local X-axis
+      double beta = std::atan2(c0.z(), c0.x());
+      tf2::Quaternion q_correction;
+      q_correction.setRotation(tf2::Vector3(0.0, 1.0, 0.0), -2.0 * beta);
+      tf2::Quaternion q_out = q_correction * q;
+      q_out.normalize();
+      ts.transform.rotation.x = q_out.x();
+      ts.transform.rotation.y = q_out.y();
+      ts.transform.rotation.z = q_out.z();
+      ts.transform.rotation.w = q_out.w();
+    }
+
 
     // Enqueue target VR pose
     TargetVrPoseEnqueue(std::move(ts));
@@ -771,6 +800,14 @@ bool VrRobotController::InitIkSolver() {
       LE_LOG_INFO << "End effector frame set to: " << end_point_frame_ << std::endl;
     }
 
+    // Set enable_human_arm_ for XLeRobotKinematics
+    auto xlerobot_kinematics = dynamic_cast<XLeRobotKinematics*>(ik_solver_.get());
+    if (xlerobot_kinematics) {
+      xlerobot_kinematics->SetEnableHumanArm(enable_human_arm_);
+      LE_LOG_INFO << "XLeRobotKinematics enable_human_arm_ set to: "
+                  << (enable_human_arm_ ? "true" : "false") << std::endl;
+    }
+
     LE_LOG_INFO << "IK solver (type: " << kinematics_solver_type_
                 << ") initialized successfully"
                 << " - Base: " << gripper_world_frame_ << ", Tip: " << tip_link_ << " with "
@@ -893,6 +930,25 @@ VrRobotController::LimitTargetTf(const tf2::Transform &target_transform) const {
   limited_transform.setOrigin(position);
   limited_transform.setRotation(rotation);
   return limited_transform;
+}
+
+tf2::Transform
+VrRobotController::PersonifyEePose(const tf2::Transform &target_transform) {
+  static double origin_z = 0.4;
+
+  if (!enable_human_arm_) {
+    return target_transform;
+  }
+
+  tf2::Quaternion q = target_transform.getRotation();
+
+  tf2::Vector3 position = target_transform.getOrigin();
+  position.setY(-position.y());
+
+  // TODO: (Bubble) use gripper height from tf
+  position.setZ(origin_z - position.z());
+
+  return tf2::Transform(q, position);
 }
 
 tf2::Transform VrRobotController::NormalizeS101GripperTf(
@@ -1128,6 +1184,8 @@ void VrRobotController::ProcessEePose(
 
     // Apply constraints and limits to the target transform after fine tuning
     corrected_target_transform = LimitTargetTf(corrected_target_transform);
+
+    corrected_target_transform = PersonifyEePose(corrected_target_transform);
 
     {
       geometry_msgs::msg::TransformStamped test_gripper_tf;

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
+import threading
+
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-import threading
-import time
 
 
 class JointStateForwarder(Node):
@@ -13,7 +13,7 @@ class JointStateForwarder(Node):
 
         # Publisher for /right/joint_states
         self.joint_state_publisher = self.create_publisher(
-            JointState, "/right/joint_states", 10
+            JointState, "/joint_states", 10
         )
 
         # Publisher for /left/joint_states
