@@ -614,22 +614,24 @@ void VrRobotController::UpdateVrPose() {
     }
     q.normalize();
 
-    if(enable_human_arm_)
-    {
+    tf2::Quaternion q_out = q;
+
+    if (enable_human_arm_) {
       tf2::Matrix3x3 R(q);
       tf2::Vector3 c0 = R.getColumn(0);
-      // Extract world Y rotation angle beta from XZ projection of local X-axis
+      // Extract world Y rotation angle beta from XZ projection of local
+      // X-axis
       double beta = std::atan2(c0.z(), c0.x());
       tf2::Quaternion q_correction;
       q_correction.setRotation(tf2::Vector3(0.0, 1.0, 0.0), -2.0 * beta);
-      tf2::Quaternion q_out = q_correction * q;
+      q_out = q_correction * q;
       q_out.normalize();
-      ts.transform.rotation.x = q_out.x();
-      ts.transform.rotation.y = q_out.y();
-      ts.transform.rotation.z = q_out.z();
-      ts.transform.rotation.w = q_out.w();
     }
 
+    ts.transform.rotation.x = q_out.x();
+    ts.transform.rotation.y = q_out.y();
+    ts.transform.rotation.z = q_out.z();
+    ts.transform.rotation.w = q_out.w();
 
     // Enqueue target VR pose
     TargetVrPoseEnqueue(std::move(ts));
