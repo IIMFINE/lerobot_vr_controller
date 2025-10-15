@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 
 import os
+
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.conditions import IfCondition
 from launch.substitutions import (
     LaunchConfiguration,
     PathJoinSubstitution,
-    EqualsSubstitution,
 )
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+from launch import LaunchDescription
 
 
 def generate_launch_description():
@@ -92,6 +92,18 @@ def generate_launch_description():
         description="Path to the motor calibration file",
     )
 
+    chassis_config_file_arg = DeclareLaunchArgument(
+        "chassis_config_file",
+        default_value=PathJoinSubstitution(
+            [
+                FindPackageShare("lerobot_vr_controller"),
+                "config",
+                "chassis_config.yaml",
+            ]
+        ),
+        description="Path to the chassis configuration file",
+    )
+
     arm_side_arg = DeclareLaunchArgument(
         "arm_side",
         default_value="right",
@@ -128,6 +140,9 @@ def generate_launch_description():
                         ),
                         "motor_calibration_file": LaunchConfiguration(
                             "motor_calibration_file"
+                        ),
+                        "chassis_config_file": LaunchConfiguration(
+                            "chassis_config_file"
                         ),
                     }
                 ],
@@ -208,6 +223,7 @@ def generate_launch_description():
             log_level_arg,
             joint_motor_config_file_arg,
             motor_calibration_file_arg,
+            chassis_config_file_arg,
             arm_side_arg,
             OpaqueFunction(function=launch_nodes),
         ]

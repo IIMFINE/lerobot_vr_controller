@@ -1,0 +1,3 @@
+linear_vel_rate: 0.2
+angular_vel_rate: 0.2
+vel_cmd_topic: "/vr/chassis_vel_cmd"
