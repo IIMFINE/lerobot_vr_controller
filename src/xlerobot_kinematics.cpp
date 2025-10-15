@@ -90,7 +90,7 @@ bool XLeRobotKinematics::Initialize(
 
   // 打印所有机械臂长度参数
   PrintArmLengthParameters();
-  
+
   return true;
 }
 
@@ -118,10 +118,10 @@ bool XLeRobotKinematics::SolvePolarIK(const tf2::Transform &target_transform,
 
   // 使用 shoulder link 的初始平移来对齐目标坐标
   const tf2::Vector3 shoulder_translation =
-    shoulder_link_initial_transform_.getOrigin();
+      shoulder_link_initial_transform_.getOrigin();
   x = x - shoulder_translation.getX() - 0.02;
   // y = y - shoulder_translation.getY();
-  z = z - shoulder_translation.getZ()/2;
+  z = z - shoulder_translation.getZ() / 2;
 
   // 步骤1：计算第0关节角度（极坐标旋转角）
   // 考虑URDF中shoulder_pan的origin偏移
@@ -391,21 +391,24 @@ void XLeRobotKinematics::SetDefaultJointLimits() {
 
 void XLeRobotKinematics::PrintArmLengthParameters() const {
   LE_LOG_INFO << "=== Arm Length Parameters ===" << std::endl;
-  LE_LOG_INFO << "base_to_shoulder_pan_height_: " << std::fixed << std::setprecision(5) 
-              << base_to_shoulder_pan_height_ << std::endl;
+  LE_LOG_INFO << "base_to_shoulder_pan_height_: " << std::fixed
+              << std::setprecision(5) << base_to_shoulder_pan_height_
+              << std::endl;
   LE_LOG_INFO << "base_to_shoulder_lift_height_: " << std::fixed
               << std::setprecision(5) << base_to_shoulder_lift_height_
               << std::endl;
-  LE_LOG_INFO << "shoulder_pan_offset_: " << std::fixed << std::setprecision(5) 
+  LE_LOG_INFO << "shoulder_pan_offset_: " << std::fixed << std::setprecision(5)
               << shoulder_pan_offset_ << std::endl;
-  LE_LOG_INFO << "upper_arm_length_: " << std::fixed << std::setprecision(5) 
+  LE_LOG_INFO << "upper_arm_length_: " << std::fixed << std::setprecision(5)
               << upper_arm_length_ << std::endl;
-  LE_LOG_INFO << "lower_arm_length_: " << std::fixed << std::setprecision(5) 
+  LE_LOG_INFO << "lower_arm_length_: " << std::fixed << std::setprecision(5)
               << lower_arm_length_ << std::endl;
-  LE_LOG_INFO << "wrist_flex_to_roll_offset_: " << std::fixed << std::setprecision(5) 
-              << wrist_flex_to_roll_offset_ << std::endl;
-  LE_LOG_INFO << "wrist_roll_to_gripper_offset_: " << std::fixed << std::setprecision(5) 
-              << wrist_roll_to_gripper_offset_ << std::endl;
+  LE_LOG_INFO << "wrist_flex_to_roll_offset_: " << std::fixed
+              << std::setprecision(5) << wrist_flex_to_roll_offset_
+              << std::endl;
+  LE_LOG_INFO << "wrist_roll_to_gripper_offset_: " << std::fixed
+              << std::setprecision(5) << wrist_roll_to_gripper_offset_
+              << std::endl;
   LE_LOG_INFO << "min_arm_reach_: " << std::fixed << std::setprecision(5)
               << min_arm_reach_ << std::endl;
   LE_LOG_INFO << "max_arm_reach_: " << std::fixed << std::setprecision(5)
@@ -737,8 +740,8 @@ bool XLeRobotKinematics::ParseShoulderLinkInitialTransform(
 
   auto link = urdf_model_->getLink(shoulder_link);
   if (!link) {
-    LE_LOG_ERROR << "Shoulder link '" << shoulder_link
-                 << "' not found in URDF" << std::endl;
+    LE_LOG_ERROR << "Shoulder link '" << shoulder_link << "' not found in URDF"
+                 << std::endl;
     return false;
   }
 
@@ -761,9 +764,9 @@ bool XLeRobotKinematics::ParseShoulderLinkInitialTransform(
                                 origin_position.z);
 
     // 正确的链式累积：
-    // 若当前已知的是 target_link 相对于当前 link (向上遍历) 的变换 (R_acc, p_acc)
-    // 对于父关节的 parent->child 变换 (R_joint, p_joint) （URDF中 parent_to_joint_origin_transform）
-    // 则新的累积 (相对于其再上一层) 为：
+    // 若当前已知的是 target_link 相对于当前 link (向上遍历) 的变换 (R_acc,
+    // p_acc) 对于父关节的 parent->child 变换 (R_joint, p_joint) （URDF中
+    // parent_to_joint_origin_transform） 则新的累积 (相对于其再上一层) 为：
     // R_new = R_joint * R_acc
     // p_new = R_joint * p_acc + p_joint
     accumulated_position =
@@ -806,9 +809,8 @@ bool XLeRobotKinematics::ParseShoulderLinkInitialTransform(
 
   LE_LOG_INFO << "Shoulder link initial transform: ";
   LE_LOG_INFO << "  Position (xyz): x=" << std::fixed << std::setprecision(5)
-              << accumulated_position.x() << ", y="
-              << accumulated_position.y() << ", z=" << accumulated_position.z()
-              << std::endl;
+              << accumulated_position.x() << ", y=" << accumulated_position.y()
+              << ", z=" << accumulated_position.z() << std::endl;
   LE_LOG_INFO << "  Orientation (RPY): roll=" << initial_roll
               << ", pitch=" << initial_pitch << ", yaw=" << initial_yaw
               << std::endl;
