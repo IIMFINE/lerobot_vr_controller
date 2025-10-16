@@ -57,7 +57,7 @@ double JointMotorConvert::MotorToJointPosition(const std::string &joint_name,
 
   if (mapping_it == joint_motor_mappings_.end() ||
       scale_it == joint_motor_scales_.end()) {
-    LE_LOG_ERROR << "Joint " << joint_name << " not found in configuration"
+    LE_LOG_ERROR_T(5s) << "Joint " << joint_name << " not found in configuration"
                  << std::endl;
     return 0.0;
   }

@@ -1,4 +1,5 @@
 #include "chassis_controller.h"
+#include "log.h"
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 
@@ -23,13 +24,13 @@ ChassisController::~ChassisController() {}
 
 void ChassisController::LoadConfig(const std::string& config_path) {
   if (config_path.empty()) {
-    RCLCPP_WARN(node_->get_logger(), "Config path is empty, using default values");
+    LE_LOG_INFO << "Config path is empty, using default values" << std::endl;
     return;
   }
 
   std::ifstream file(config_path);
   if (!file.good()) {
-    RCLCPP_ERROR(node_->get_logger(), "Failed to open config file: %s", config_path.c_str());
+    LE_LOG_ERROR << "Failed to open config file: " << config_path << std::endl;
     return;
   }
 
@@ -38,20 +39,20 @@ void ChassisController::LoadConfig(const std::string& config_path) {
     
     if (config["linear_vel_rate"]) {
       linear_vel_rate_ = config["linear_vel_rate"].as<double>();
-      RCLCPP_INFO(node_->get_logger(), "Loaded linear_vel_rate: %f", linear_vel_rate_);
+      LE_LOG_INFO << "Loaded linear_vel_rate: " << linear_vel_rate_ << std::endl;
     }
     
     if (config["angular_vel_rate"]) {
       angular_vel_rate_ = config["angular_vel_rate"].as<double>();
-      RCLCPP_INFO(node_->get_logger(), "Loaded angular_vel_rate: %f", angular_vel_rate_);
+      LE_LOG_INFO << "Loaded angular_vel_rate: " << angular_vel_rate_ << std::endl;
     }
     
     if (config["vel_cmd_topic"]) {
       vel_cmd_topic_ = config["vel_cmd_topic"].as<std::string>();
-      RCLCPP_INFO(node_->get_logger(), "Loaded vel_cmd_topic: %s", vel_cmd_topic_.c_str());
+      LE_LOG_INFO << "Loaded vel_cmd_topic: " << vel_cmd_topic_ << std::endl;
     }
   } catch (const YAML::Exception& e) {
-    RCLCPP_ERROR(node_->get_logger(), "Failed to parse config file: %s", e.what());
+    LE_LOG_ERROR << "Failed to parse config file: " << e.what() << std::endl;
   }
 }
 
@@ -65,9 +66,11 @@ void ChassisController::ProcessJoyMsg(
     return;
   }
 
-  twist_msg_.linear.x = msg->axes[2] * linear_vel_rate_;
-  twist_msg_.angular.z = msg->axes[3] * angular_vel_rate_;
+  twist_msg_.angular.z = msg->axes[2] * angular_vel_rate_;
+  twist_msg_.linear.x = msg->axes[3] * linear_vel_rate_;
 
+  LE_LOG_INFO << "Publishing Twist: linear.x=" << twist_msg_.linear.x
+              << ", angular.z=" << twist_msg_.angular.z << std::endl;
   twist_publisher_->publish(twist_msg_);
 }
 
