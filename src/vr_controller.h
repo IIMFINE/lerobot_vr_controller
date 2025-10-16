@@ -2,6 +2,7 @@
 #define RECEVICE_VR_TF_H_
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <memory>
@@ -27,6 +28,7 @@
 #include "vr_trigger_joint_convert.h"
 #include "yaml-cpp/yaml.h"
 
+#include "chassis_controller.h"
 #include "common_math.h"
 #include "interface_type.h"
 #include "log.h"
@@ -59,6 +61,7 @@ public:
       const std::string &yaml_file_path, const std::string &urdf_file_path,
       const std::string &joint_motor_config_file_path,
       const std::string &motor_calibration_file_path,
+      const std::string &chassis_config_path,
       const std::string &motor_cmd_topic = kRobotControlMotorCmdTopic,
       const std::string &motor_state_topic = kRobotControlMotorStateTopic);
 
@@ -148,6 +151,10 @@ private:
 
   // === Callback Functions ===
   void JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg, const std::string &topic_name);
+
+  // Process chassis control flag toggle with A button
+  void ProcessChassisControlFlag(const sensor_msgs::msg::Joy::SharedPtr msg,
+                                 int button_index);
 
   // Callback to update latest joint state
   void UpdateJointState(const sensor_msgs::msg::JointState::SharedPtr msg);
@@ -320,6 +327,9 @@ private:
   // Robot control interface for managing joint and gripper commands
   std::unique_ptr<RobotControlInterface> robot_control_interface_;
 
+  // Chassis controller for managing chassis movement
+  std::unique_ptr<lerobot::ChassisController> chassis_controller_;
+
   // === Worker Threads ===
   // Dedicated worker thread to process EE targets into joint commands
   std::atomic<bool> ee_to_joint_worker_running_{false};
@@ -327,6 +337,12 @@ private:
 
   // === Control Flags ===
   std::atomic<bool> control_robot_flag_{false};
+
+  // Chassis control flag toggled by A button
+  std::atomic<bool> chassis_control_flag_{false};
+
+  // A button press state for toggle detection
+  bool a_button_pressed_{false};
 
   // === Home Pose Configuration ===
   // Home pose joint positions loaded from YAML configuration

@@ -27,6 +27,7 @@ ament_auto_add_executable(${PROJECT_NAME}_node
   src/robot_communicate_interface.cpp
   src/joint_position_filter.cpp
   src/xlerobot_kinematics.cpp
+  src/chassis_controller.cpp
 )
 
 # Include header files

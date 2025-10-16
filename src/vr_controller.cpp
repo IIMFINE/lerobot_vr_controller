@@ -1,4 +1,5 @@
 #include "vr_controller.h"
+#include "chassis_controller.h"
 #include "log.h"
 #include "xlerobot_kinematics.h"
 
@@ -57,6 +58,7 @@ bool VrRobotController::Initialize(
     const std::string &yaml_file_path, const std::string &urdf_file_path,
     const std::string &joint_motor_config_file_path,
     const std::string &motor_calibration_file_path,
+    const std::string &chassis_config_path,
     const std::string &motor_cmd_topic, const std::string &motor_state_topic) {
   // Perform any additional initialization steps here
   LE_LOG_INFO << "Initialize() called" << std::endl;
@@ -91,6 +93,22 @@ bool VrRobotController::Initialize(
 
   LE_LOG_INFO << "Robot control interface initialized successfully"
               << std::endl;
+
+  // Initialize chassis controller
+  if (!chassis_config_path.empty()) {
+    try {
+      chassis_controller_ = std::make_unique<lerobot::ChassisController>(
+          node_, chassis_config_path);
+      LE_LOG_INFO << "Chassis controller initialized successfully" << std::endl;
+    } catch (const std::exception &e) {
+      LE_LOG_ERROR << "Failed to initialize chassis controller: " << e.what()
+                   << std::endl;
+      return false;
+    }
+  } else {
+    LE_LOG_INFO << "Chassis config path is empty, skipping chassis controller initialization"
+                << std::endl;
+  }
 
   return true;
 }
@@ -648,6 +666,7 @@ void VrRobotController::JoystickCallback(
   constexpr const int kTriggerButton = 0;
   constexpr const int kSideTriggerButton = 1;
   constexpr const int kBButton = 5;
+  constexpr const int kAButton = 4;
 
   // VR controller axes indices
   constexpr const int kZClockwiseRotateAxis = 2;
@@ -655,9 +674,15 @@ void VrRobotController::JoystickCallback(
 
   constexpr const int kSideTriggerThreshold = 200;
 
+  // Process joystick message with chassis controller
+  if (chassis_controller_ && chassis_control_flag_) {
+    chassis_controller_->ProcessJoyMsg(msg);
+  }
+
   // Control robot_control_interface_ based on side trigger button value
+  int side_trigger_value = 0;
   if (msg->buttons.size() > kSideTriggerButton && robot_control_interface_) {
-    int side_trigger_value = msg->buttons[kSideTriggerButton];
+    side_trigger_value = msg->buttons[kSideTriggerButton];
     if (side_trigger_value > kSideTriggerThreshold) {
       StartRobotControl();
       LE_LOG_INFO_T(5s) << "Robot control triggered by side trigger: "
@@ -706,6 +731,9 @@ void VrRobotController::JoystickCallback(
     return;
   }
 
+  // Handle A button for chassis control flag toggle with debounce
+  ProcessChassisControlFlag(msg, kAButton);
+
   // Handle trigger input for gripper control
   if (trigger_converter_) {
     // Extract trigger value from the joystick message
@@ -729,7 +757,8 @@ void VrRobotController::JoystickCallback(
   }
 
   // Handle axes input for EE pose fine tune
-  if (msg->axes.size() > kZAdvanceAxis) {
+  if (msg->axes.size() > kZAdvanceAxis &&
+      side_trigger_value > kSideTriggerThreshold) {
     std::unique_lock<std::shared_mutex> lock(ee_pose_fine_tune_mutex_);
 
     constexpr double kAxesIgnoreThreshold = 0.1;
@@ -751,6 +780,26 @@ void VrRobotController::JoystickCallback(
                       << ee_pose_fine_tune_.z_advance_
                       << ", Z clockwise rotate: "
                       << ee_pose_fine_tune_.z_clockwise_rotate_ << std::endl;
+  }
+}
+
+void VrRobotController::ProcessChassisControlFlag(
+    const sensor_msgs::msg::Joy::SharedPtr msg, int button_index) {
+  if (msg->buttons.size() <= static_cast<size_t>(button_index)) {
+    return;
+  }
+
+  bool button_value = msg->buttons[button_index] != 0;
+
+  if (button_value) {
+    a_button_pressed_ = true;
+  }
+
+  if (a_button_pressed_ && !button_value) {
+    chassis_control_flag_ = !chassis_control_flag_;
+    a_button_pressed_ = false;
+    LE_LOG_INFO << "Chassis control flag toggled to: "
+                << (chassis_control_flag_ ? "true" : "false") << std::endl;
   }
 }
 
