@@ -732,19 +732,7 @@ void VrRobotController::JoystickCallback(
   }
 
   // Handle A button for chassis control flag toggle with debounce
-  if (msg->buttons.size() > kAButton && msg->buttons[kAButton] != 0) {
-    auto current_time = std::chrono::steady_clock::now();
-    auto time_since_last_press =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            current_time - last_a_button_press_time_);
-
-    if (time_since_last_press.count() >= 300) {
-      chassis_control_flag_ = !chassis_control_flag_;
-      last_a_button_press_time_ = current_time;
-      LE_LOG_INFO << "Chassis control flag toggled to: "
-                  << (chassis_control_flag_ ? "true" : "false") << std::endl;
-    }
-  }
+  ProcessChassisControlFlag(msg, kAButton);
 
   // Handle trigger input for gripper control
   if (trigger_converter_) {
@@ -792,6 +780,26 @@ void VrRobotController::JoystickCallback(
                       << ee_pose_fine_tune_.z_advance_
                       << ", Z clockwise rotate: "
                       << ee_pose_fine_tune_.z_clockwise_rotate_ << std::endl;
+  }
+}
+
+void VrRobotController::ProcessChassisControlFlag(
+    const sensor_msgs::msg::Joy::SharedPtr msg, int button_index) {
+  if (msg->buttons.size() <= static_cast<size_t>(button_index)) {
+    return;
+  }
+
+  bool button_value = msg->buttons[button_index] != 0;
+
+  if (button_value) {
+    a_button_pressed_ = true;
+  }
+
+  if (a_button_pressed_ && !button_value) {
+    chassis_control_flag_ = !chassis_control_flag_;
+    a_button_pressed_ = false;
+    LE_LOG_INFO << "Chassis control flag toggled to: "
+                << (chassis_control_flag_ ? "true" : "false") << std::endl;
   }
 }
 

@@ -152,6 +152,10 @@ private:
   // === Callback Functions ===
   void JoystickCallback(const sensor_msgs::msg::Joy::SharedPtr msg, const std::string &topic_name);
 
+  // Process chassis control flag toggle with A button
+  void ProcessChassisControlFlag(const sensor_msgs::msg::Joy::SharedPtr msg,
+                                 int button_index);
+
   // Callback to update latest joint state
   void UpdateJointState(const sensor_msgs::msg::JointState::SharedPtr msg);
 
@@ -337,8 +341,8 @@ private:
   // Chassis control flag toggled by A button
   std::atomic<bool> chassis_control_flag_{false};
 
-  // Timestamp for A button press debounce
-  std::chrono::steady_clock::time_point last_a_button_press_time_;
+  // A button press state for toggle detection
+  bool a_button_pressed_{false};
 
   // === Home Pose Configuration ===
   // Home pose joint positions loaded from YAML configuration
