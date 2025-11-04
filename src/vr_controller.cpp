@@ -110,6 +110,14 @@ bool VrRobotController::Initialize(
                 << std::endl;
   }
 
+  try {
+    vr_tf_filter_ = std::make_unique<VrTfFilter>(filter_alpha_, filter_alpha_);
+  } catch (const std::exception &e) {
+    LE_LOG_ERROR << "Failed to initialize VrTfFilter: " << e.what()
+                 << std::endl;
+    return false;
+  }
+
   return true;
 }
 
@@ -1204,7 +1212,16 @@ void VrRobotController::ProcessEePose(
 
   // Process only the most recent poses
   for (size_t i = start_idx; i < local_queue.size(); ++i) {
-    const auto &target_pose_stamped = local_queue[i];
+    geometry_msgs::msg::TransformStamped target_pose_stamped = local_queue[i];
+
+    if (vr_tf_filter_) {
+      try {
+        target_pose_stamped = vr_tf_filter_->Filter(target_pose_stamped);
+      } catch (const std::exception &e) {
+        LE_LOG_ERROR_T(5s) << "VrTfFilter exception: " << e.what() << std::endl;
+        return;
+      }
+    }
 
     // Convert TransformStamped to tf2::Transform
     tf2::Transform target_transform;

@@ -35,6 +35,7 @@
 #include "robot_communicate_interface.h"
 #include "robot_control_interface.h"
 #include "topic.h"
+#include "vr_tf_filter.h"
 
 namespace lerobot_vr_controller {
 
@@ -323,6 +324,9 @@ private:
 
   // VR trigger to joint converter
   std::unique_ptr<vr_controller::VrTriggerJointConvert> trigger_converter_;
+
+  // VR pose filter
+  std::unique_ptr<VrTfFilter> vr_tf_filter_;
 
   // Robot control interface for managing joint and gripper commands
   std::unique_ptr<RobotControlInterface> robot_control_interface_;
