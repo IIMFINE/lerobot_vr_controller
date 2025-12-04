@@ -2,6 +2,16 @@
 
 ROS2 package for SO-ARM101 robot VR controller
 
+## Demo
+
+|                 VR Teleoperation                  |                 Dual Arm Control                  |                 Chassis Control                  |
+| :-----------------------------------------------: | :-----------------------------------------------: | :----------------------------------------------: |
+| ![VR Teleoperation](docs/飞书20251203-140454.gif) | ![Dual Arm Control](docs/飞书20251203-140537.gif) | ![Chassis Control](docs/飞书20251203-140542.gif) |
+
+|                  VR Control Robot                   |
+| :-------------------------------------------------: |
+| ![VR Control Robot](docs/飞书20251204-211845.gif) |
+
 ## Overview
 
 This ROS2 package provides a comprehensive VR-based teleoperation system for the SO-ARM101 robotic arm. It enables intuitive robot control through VR controllers by mapping VR headset and controller transforms to robot end-effector poses and joint commands.
