@@ -268,4 +268,4 @@ Configuration for VR transform republishing script used in replay/playback scena
 
 ## Sponsors
 
-This project is sponsored by **MakerModes**.
+This project is sponsored by **MakerMods**.
