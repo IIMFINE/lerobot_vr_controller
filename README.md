@@ -258,3 +258,14 @@ node: left_lerobot_vr_controller  # Node name for remapped instance
 **File Location**: `config/left_reply_vr_tf.yaml` / `config/right_reply_vr_tf.yaml`
 
 Configuration for VR transform republishing script used in replay/playback scenarios.
+
+## Contributors
+
+- **Kaho**
+- **Issac Sim**
+- **Ryan**
+- **Qi Liu**
+
+## Sponsors
+
+This project is sponsored by **MakerModes**.
